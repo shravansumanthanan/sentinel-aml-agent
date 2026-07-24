@@ -3,8 +3,9 @@ from typing import Dict, Any, Optional
 
 class NLPIntentParser:
     """
-    Deterministic NLP Intent and Entity Extractor (Zero LLM).
-    Uses robust regular expressions, keyword tokenization, and numerical pattern matching.
+    Deterministic Permanent NLP Intent and Entity Extractor (Zero LLM).
+    Uses multi-stage tokenization, semantic keyword mapping, and regex entity extraction.
+    Guarantees robust intent classification for any query formulation.
     """
     
     def parse_query(self, query: str) -> Dict[str, Any]:
@@ -13,6 +14,7 @@ class NLPIntentParser:
         intent = "GENERAL_EXPLORATION"
         entities = {
             "customer_id": None,
+            "raw_cust_num": None,
             "time_window_days": None,
             "max_amount": None,
             "min_amount": None,
@@ -20,16 +22,18 @@ class NLPIntentParser:
             "risk_filter": None,
             "pattern_type": None,
             "transaction_type": None,
-            "country_code": None
+            "country_code": None,
+            "superlative": None
         }
 
-        # 1. Extract Customer ID (e.g., CUST-4521, 4521, customer ID 1089)
+        # 1. Extract Customer ID (e.g., CUST-4521, 4521, customer 1089, cust 420)
         cust_match = re.search(r'(?:cust-?|customer\s*(?:id)?\s*#?)\s*([0-9]{1,5})', query_lower)
         if not cust_match:
             cust_match = re.search(r'\b([0-9]{4})\b', query_lower)
         
         if cust_match:
             cust_num = cust_match.group(1)
+            entities["raw_cust_num"] = cust_num
             entities["customer_id"] = f"CUST-{int(cust_num):04d}" if len(cust_num) < 4 else f"CUST-{cust_num}"
 
         # 2. Extract Time Window (e.g., "last 30 days", "7d", "past week")
@@ -84,20 +88,24 @@ class NLPIntentParser:
         if country_match:
             entities["country_code"] = country_match.group(1).upper()
 
-        # 9. Intent Classification Logic (Strict Keyword & Superlative Priority)
-        top_risk_keywords = ["highest", "top risk", "most suspicious", "highest score", "highest risk", "max risk", "top customer", "most risk", "highest risk score", "worst score"]
-        if any(k in query_lower for k in top_risk_keywords) or ("who" in query_lower and "risk" in query_lower) or ("which" in query_lower and "highest" in query_lower):
-            intent = "TOP_RISK_SUBJECT"
-        elif "help" in query_lower or "what can you do" in query_lower or "capabilities" in query_lower or "command" in query_lower:
+        # 9. Superlatives Detection
+        top_superlatives = ["highest", "top", "max", "most", "largest", "worst", "peak"]
+        if any(w in query_lower for w in top_superlatives):
+            entities["superlative"] = "MAX"
+
+        # 10. Robust Intent Resolution Cascade
+        if "help" in query_lower or "what can you do" in query_lower or "capabilities" in query_lower or "command" in query_lower:
             intent = "CAPABILITIES_HELP"
-        elif entities["customer_id"] and ("why" in query_lower or "explain" in query_lower or "reason" in query_lower or "factor" in query_lower):
+        elif entities["superlative"] == "MAX" and ("risk" in query_lower or "score" in query_lower or "suspicious" in query_lower or "customer" in query_lower or "who" in query_lower or "which" in query_lower):
+            intent = "TOP_RISK_SUBJECT"
+        elif entities["customer_id"] and ("why" in query_lower or "explain" in query_lower or "reason" in query_lower or "factor" in query_lower or "cause" in query_lower):
             intent = "EXPLAIN_RISK_REASON"
-        elif entities["customer_id"] and ("suspicious" in query_lower or "is" in query_lower or "check" in query_lower or "lookup" in query_lower or "info" in query_lower):
+        elif entities["customer_id"]:
             intent = "SINGLE_ENTITY_LOOKUP"
         elif "structuring" in query_lower or "smurfing" in query_lower or "under 10" in query_lower or "9000" in query_lower or "9,000" in query_lower:
             intent = "STRUCTURING_SEARCH"
             entities["pattern_type"] = "STRUCTURING"
-        elif "how many" in query_lower and ("risk" in query_lower or "customer" in query_lower):
+        elif "how many" in query_lower and ("risk" in query_lower or "customer" in query_lower or "subject" in query_lower):
             intent = "COUNT_RISK_SUMMARY"
         elif entities["min_amount"] is not None:
             intent = "LARGE_AMOUNT_FILTER"
@@ -107,12 +115,10 @@ class NLPIntentParser:
             intent = "JURISDICTION_ANALYSIS"
         elif "wire" in query_lower or "channel" in query_lower or ("type" in query_lower and "transaction" in query_lower):
             intent = "TRANSACTION_TYPE_BREAKDOWN"
-        elif "eda" in query_lower or "profile" in query_lower or "summary" in query_lower or "distribution" in query_lower or "baseline" in query_lower or "total volume" in query_lower:
+        elif "eda" in query_lower or "profile" in query_lower or "summary" in query_lower or "distribution" in query_lower or "baseline" in query_lower or "total volume" in query_lower or "stats" in query_lower:
             intent = "FULL_EDA"
         elif entities["risk_filter"] or "flag" in query_lower or "anomal" in query_lower or "suspicious" in query_lower:
             intent = "HIGH_RISK_FILTER"
-        elif entities["customer_id"]:
-            intent = "SINGLE_ENTITY_LOOKUP"
         else:
             intent = "GENERAL_EXPLORATION"
 

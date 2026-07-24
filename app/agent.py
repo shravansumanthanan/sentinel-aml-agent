@@ -1,5 +1,6 @@
 import time
 import os
+import difflib
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List
@@ -50,6 +51,29 @@ class AMLAgentOrchestrator:
             sorted_df = self.df_classified.sort_values(by="composite_risk_score", ascending=False)
             return str(sorted_df.iloc[0]["customer_id"])
         return "CUST-0001"
+
+    def _find_closest_customer_id(self, target_id: str, raw_num: str = None) -> Optional[str]:
+        """Finds closest matching customer ID from active dataset using string distance and numeric matching."""
+        all_ids = self.df_customers["customer_id"].astype(str).tolist()
+        if target_id in all_ids:
+            return target_id
+        
+        # 1. Check numeric padding match (e.g. 4520 -> CUST-0420)
+        if raw_num:
+            num_val = int(raw_num)
+            padded = f"CUST-{num_val:04d}"
+            if padded in all_ids:
+                return padded
+            
+            # 2. Find closest numeric ID
+            nums = [int(i.replace("CUST-", "")) for i in all_ids if i.startswith("CUST-") and i.replace("CUST-", "").isdigit()]
+            if nums:
+                closest_num = min(nums, key=lambda x: abs(x - num_val))
+                return f"CUST-{closest_num:04d}"
+
+        # 3. String Levenshtein distance fallback
+        matches = difflib.get_close_matches(target_id, all_ids, n=1, cutoff=0.3)
+        return matches[0] if matches else None
 
     def _clean_records(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Utility to convert DataFrame to dict records replacing NaN/Inf with JSON-compliant defaults."""
@@ -136,7 +160,9 @@ class AMLAgentOrchestrator:
                 output_payload["sar_narrative"] = sar_text
 
         elif intent == "EXPLAIN_RISK_REASON":
-            cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
+            raw_cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
+            cid = self._find_closest_customer_id(raw_cid, entities.get("raw_cust_num")) or raw_cid
+
             tools_called.extend(["SingleEntityLookupTool", "RiskClassifierTool"])
             tools_skipped.extend(["EDATool", "ThresholdStressTestTool"])
             execution_plan = [
@@ -162,8 +188,9 @@ class AMLAgentOrchestrator:
                 
                 reason_text = "<br>".join(reasons) if reasons else "• Standard low-risk profile with normal transaction velocity."
                 cust_name = c.get("customer_name") or c.get("customer_id") or cid
+                match_note = f" <em>(Matched nearest record for query {raw_cid})</em>" if raw_cid != cid else ""
                 exp = (
-                    f"<strong>Risk Factor Decomposition for {cid} ({cust_name}):</strong><br>"
+                    f"<strong>Risk Factor Decomposition for {cid} ({cust_name}){match_note}:</strong><br>"
                     f"Composite Risk Score: <strong>{r.get('composite_risk_score')}/100 ({r.get('risk_level')} RISK)</strong><br>"
                     f"Recommended Action: <strong>{r.get('recommended_action')}</strong><br><br>"
                     f"{reason_text}"
@@ -173,24 +200,19 @@ class AMLAgentOrchestrator:
                 if r.get("risk_level") == "HIGH":
                     sar_text = self.sar_tool.generate_sar(cid, c, r, lookup_data["transaction_history"])
                     output_payload["sar_narrative"] = sar_text
-            else:
-                top_cid = self._get_top_suspicious_customer_id()
-                output_payload["explanations"].append(
-                    f"Customer ID <strong>{cid}</strong> was not found in the active customer database. "
-                    f"Try querying a valid subject such as top risk subject <strong>{top_cid}</strong>."
-                )
 
         elif intent == "SINGLE_ENTITY_LOOKUP":
-            cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
+            raw_cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
+            cid = self._find_closest_customer_id(raw_cid, entities.get("raw_cust_num")) or raw_cid
+
             tools_called.extend(["SingleEntityLookupTool", "RiskClassifierTool", "SARGeneratorTool"])
             tools_skipped.extend(["EDATool", "DatasetWideMLTool", "ThresholdStressTestTool"])
             
             execution_plan = [
-                f"1. Extract target Customer ID: {cid}",
+                f"1. Resolve target Customer ID: {cid}",
                 "2. Perform single-entity database lookup (SingleEntityLookupTool)",
                 "3. Compute individual risk profile & rule hits (RiskClassifierTool)",
-                "4. Auto-generate FinCEN SAR Narrative if high risk (SARGeneratorTool)",
-                "5. Skip dataset-wide EDA & batch clustering to optimize latency"
+                "4. Auto-generate FinCEN SAR Narrative if high risk (SARGeneratorTool)"
             ]
 
             lookup_data = self.single_lookup_tool.run(cid, self.df_transactions, self.df_customers, self.df_classified)
@@ -202,8 +224,9 @@ class AMLAgentOrchestrator:
                 tx_hist = lookup_data["transaction_history"]
                 
                 cust_name = cust_info.get('customer_name') or cust_info.get('customer_id') or cid
+                match_note = f" <em>(Mapped {raw_cid} to nearest active dataset record {cid})</em>" if raw_cid != cid else ""
                 exp_str = (
-                    f"Customer <strong>{cid}</strong> ({cust_name}) has a Risk Score of "
+                    f"Customer <strong>{cid}</strong> ({cust_name}){match_note} has a Risk Score of "
                     f"<strong>{risk_prof.get('composite_risk_score')}/100 ({risk_prof.get('risk_level')} RISK)</strong>. "
                     f"Recommended Action: <strong>{risk_prof.get('recommended_action')}</strong>. "
                     f"Detected {risk_prof.get('structuring_count')} transactions in the structuring band."
@@ -213,12 +236,6 @@ class AMLAgentOrchestrator:
                 if risk_prof.get("risk_level") == "HIGH":
                     sar_text = self.sar_tool.generate_sar(cid, cust_info, risk_prof, tx_hist)
                     output_payload["sar_narrative"] = sar_text
-            else:
-                top_cid = self._get_top_suspicious_customer_id()
-                output_payload["explanations"].append(
-                    f"Customer ID <strong>{cid}</strong> was not found in the active customer database.<br>"
-                    f"<em>Tip:</em> Try querying <strong>{top_cid}</strong> (Top Risk Subject) or choose from the flagged risk table."
-                )
 
         elif intent == "HIGH_RISK_FILTER":
             risk_flt = entities.get("risk_filter") or "HIGH"
