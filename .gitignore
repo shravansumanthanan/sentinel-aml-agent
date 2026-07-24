@@ -22,8 +22,6 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Byte-compiled / optimized / DLL files
 *.pyc
 
 # Environments
@@ -32,6 +30,11 @@ wheels/
 env/
 venv/
 ENV/
+
+# Data & Agent artifacts
+data/*.csv
+data/
+.agent/
 
 # Mac OS
 .DS_Store
