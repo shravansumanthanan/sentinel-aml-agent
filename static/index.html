@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SENTINEL-AML | Autonomous Compliance Decision System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Metrics Header -->
+        <header class="app-header">
+            <div class="logo-section">
+                <div class="logo-icon">🛡️</div>
+                <div class="logo-text">
+                    <h1>SENTINEL-AML</h1>
+                    <span>Autonomous Compliance Decision System</span>
+                </div>
+            </div>
+
+            <div class="header-metrics">
+                <div class="metric-card">
+                    <span class="metric-label">TOTAL VOLUME</span>
+                    <span class="metric-value" id="metric-volume">$0.00</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">TOTAL TRANSACTIONS</span>
+                    <span class="metric-value" id="metric-tx-count">0</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-label">UNIQUE CUSTOMERS</span>
+                    <span class="metric-value" id="metric-customers">0</span>
+                </div>
+                <div class="metric-card highlight">
+                    <span class="metric-label">ENGINE LATENCY</span>
+                    <span class="metric-value" id="metric-latency">&lt; 50ms</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <div class="main-workspace">
+            <!-- Left: Chat Panel -->
+            <section class="chat-panel">
+                <div class="panel-header">
+                    <h2>💬 AML Analyst Chat Assistant</h2>
+                    <span class="status-badge">● Zero-LLM Deterministic Agent</span>
+                </div>
+
+                <!-- Sample Chips -->
+                <div class="query-chips">
+                    <button class="chip" onclick="sendSampleQuery('Find structuring patterns in the last 30 days')">⚡ Structuring Patterns</button>
+                    <button class="chip" onclick="sendSampleQuery('Is customer ID CUST-4521 suspicious?')">🔍 Check CUST-4521</button>
+                    <button class="chip" onclick="sendSampleQuery('Which customers made 10+ transactions under $10,000?')">📊 10+ Txns &lt; $10k</button>
+                    <button class="chip" onclick="sendSampleQuery('Perform full EDA on transaction dataset')">📈 Full Dataset EDA</button>
+                </div>
+
+                <!-- Messages Stream -->
+                <div class="chat-messages" id="chat-messages">
+                    <div class="message system-msg">
+                        <div class="msg-avatar">🤖</div>
+                        <div class="msg-content">
+                            <strong>System Agent Ready:</strong> Welcome AML Analyst. Type a natural language query or select a preset query above.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Input Box -->
+                <form class="chat-input-container" id="chat-form" onsubmit="handleChatSubmit(event)">
+                    <input type="text" id="chat-input" placeholder="Ask query e.g. 'Is CUST-4521 suspicious?' or 'Find structuring patterns'..." autocomplete="off">
+                    <button type="submit" id="send-btn">Send ➔</button>
+                </form>
+            </section>
+
+            <!-- Right: Analyst Workbench Tabs -->
+            <section class="workbench-panel">
+                <div class="workbench-tabs">
+                    <button class="tab-btn active" onclick="switchTab('telemetry')">⚙️ Agent Telemetry (DAG)</button>
+                    <button class="tab-btn" onclick="switchTab('table')">📋 Flagged Risk Table</button>
+                    <button class="tab-btn" onclick="switchTab('sar')">📄 FinCEN SAR Generator</button>
+                    <button class="tab-btn" onclick="switchTab('stresstest')">🎛️ Threshold Stress-Tester</button>
+                </div>
+
+                <div class="workbench-content">
+                    <!-- Tab 1: Agent Telemetry -->
+                    <div class="tab-pane active" id="pane-telemetry">
+                        <div class="telemetry-box">
+                            <h3>🤖 Agent Decision & Execution Telemetry</h3>
+                            <p class="section-desc">Inspect what the agent decided, which tools were invoked vs. skipped, and the execution DAG.</p>
+                            
+                            <div class="telemetry-grid">
+                                <div class="telemetry-card">
+                                    <h4>PARSED INTENT</h4>
+                                    <div class="intent-badge" id="telemetry-intent">AWAITING_QUERY</div>
+                                </div>
+                                <div class="telemetry-card">
+                                    <h4>EXTRACTED ENTITIES</h4>
+                                    <pre id="telemetry-entities">{}</pre>
+                                </div>
+                            </div>
+
+                            <div class="execution-dag">
+                                <h4>EXECUTION PLAN (TOOL DAG)</h4>
+                                <ul class="plan-list" id="telemetry-plan">
+                                    <li class="idle-step">No query executed yet. Select a prompt to view the agentic flow.</li>
+                                </ul>
+                            </div>
+
+                            <div class="tools-summary">
+                                <div class="tool-list-box">
+                                    <strong class="green-text">TOOLS INVOKED:</strong>
+                                    <span id="telemetry-called">None</span>
+                                </div>
+                                <div class="tool-list-box">
+                                    <strong class="red-text">TOOLS SKIPPED:</strong>
+                                    <span id="telemetry-skipped">None</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 2: Flagged Risk Table -->
+                    <div class="tab-pane" id="pane-table">
+                        <div class="table-container">
+                            <div class="table-header-bar">
+                                <h3>Risk Classification & Escalation Table</h3>
+                                <span class="row-count" id="table-count">0 Subjects Listed</span>
+                            </div>
+                            <table class="risk-table">
+                                <thead>
+                                    <tr>
+                                        <th>Customer ID</th>
+                                        <th>Name</th>
+                                        <th>Risk Rating</th>
+                                        <th>ML Score</th>
+                                        <th>Structuring Count</th>
+                                        <th>Escalation Action</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table-body">
+                                    <tr>
+                                        <td colspan="7" class="empty-state">No query results loaded yet. Run a search to populate.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: SAR Generator -->
+                    <div class="tab-pane" id="pane-sar">
+                        <div class="sar-box">
+                            <div class="sar-header">
+                                <h3>FinCEN Suspicious Activity Report (SAR) Narrative</h3>
+                                <button class="secondary-btn" onclick="copySarNarrative()">📋 Copy Narrative</button>
+                            </div>
+                            <textarea id="sar-textarea" readonly placeholder="SAR Narrative will auto-generate here when a High Risk subject is inspected or flagged..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Tab 4: Threshold Stress Tester -->
+                    <div class="tab-pane" id="pane-stresstest">
+                        <div class="stress-box">
+                            <h3>🎛️ Interactive Structuring Threshold Stress-Tester</h3>
+                            <p class="section-desc">Simulate sensitivity adjustments by lowering the lower structuring bound from $9,000 down to test for false positives vs. hidden threats.</p>
+                            
+                            <div class="slider-control">
+                                <label for="stress-slider">Lower Structuring Bound ($): <strong id="slider-val">$8,500</strong></label>
+                                <input type="range" id="stress-slider" min="7000" max="9500" step="100" value="8500" oninput="updateSliderLabel(this.value)" onchange="runStressTest(this.value)">
+                            </div>
+
+                            <div class="stress-results" id="stress-results-box">
+                                <div class="stress-metric">
+                                    <span>BASELINE FLAGGED ($9k-$10k)</span>
+                                    <strong id="stress-baseline">--</strong>
+                                </div>
+                                <div class="stress-metric">
+                                    <span>NEW FLAGGED SUBJECTS</span>
+                                    <strong id="stress-new">--</strong>
+                                </div>
+                                <div class="stress-metric highlight-delta">
+                                    <span>SUBJECT DELTA</span>
+                                    <strong id="stress-delta">--</strong>
+                                </div>
+                            </div>
+                            <div class="interpretation-box" id="stress-interpretation">
+                                Move the slider above to trigger real-time scenario recalculation.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
