@@ -3,6 +3,7 @@ import os
 import pandas as pd
 from typing import Dict, Any, List
 from app.nlp_parser import NLPIntentParser
+from app.kaggle_loader import load_and_merge_kaggle_datasets
 from app.tools import (
     EDATool, 
     AMLFeatureEngTool, 
@@ -33,15 +34,8 @@ class AMLAgentOrchestrator:
         self.load_data()
 
     def load_data(self):
-        cust_path = os.path.join(self.data_dir, "customers.csv")
-        tx_path = os.path.join(self.data_dir, "transactions.csv")
-        
-        if not os.path.exists(cust_path) or not os.path.exists(tx_path):
-            from data_generator import generate_aml_dataset
-            generate_aml_dataset(data_dir=self.data_dir)
-            
-        self.df_customers = pd.read_csv(cust_path)
-        self.df_transactions = pd.read_csv(tx_path)
+        # Load merged Kaggle IBM AML + PaySim dataset tables
+        self.df_transactions, self.df_customers = load_and_merge_kaggle_datasets(self.data_dir)
 
         # Pre-compute feature & anomaly baseline
         self.df_features = self.feature_tool.run(self.df_transactions)
@@ -51,12 +45,10 @@ class AMLAgentOrchestrator:
     def process_query(self, query: str) -> Dict[str, Any]:
         start_time = time.time()
         
-        # Step 1: Parse Intent & Entities (Zero LLM)
         parse_result = self.parser.parse_query(query)
         intent = parse_result["intent"]
         entities = parse_result["entities"]
 
-        # Step 2: Dynamic Execution Planning
         execution_plan = []
         tools_called = []
         tools_skipped = []
@@ -71,7 +63,6 @@ class AMLAgentOrchestrator:
             "sar_narrative": None
         }
 
-        # Dynamic Execution Plan Construction based on Query Intent
         if intent == "SINGLE_ENTITY_LOOKUP":
             cid = entities.get("customer_id") or "CUST-4521"
             tools_called.extend(["SingleEntityLookupTool", "RiskClassifierTool", "SARGeneratorTool"])
@@ -130,7 +121,6 @@ class AMLAgentOrchestrator:
                 )
                 output_payload["explanations"].append(exp_str)
                 
-                # Auto-generate SAR for top subject
                 sar_text = self.sar_tool.generate_sar(
                     top_subj["customer_id"], 
                     top_subj.to_dict(), 
@@ -180,7 +170,6 @@ class AMLAgentOrchestrator:
             output_payload["explanations"].append(exp_str)
 
         else:
-            # Default General Search
             tools_called.extend(["AMLFeatureEngTool", "HybridAnomalyTool", "RiskClassifierTool"])
             tools_skipped.extend(["SingleEntityLookupTool"])
 

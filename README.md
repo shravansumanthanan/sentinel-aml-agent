@@ -16,6 +16,16 @@ Financial institutions globally are mandated by regulatory bodies (FinCEN, FATF,
 
 ---
 
+## 📊 Open Source Kaggle Dataset Citation & Sourcing
+
+Per hackathon guidelines, SENTINEL-AML utilizes schema definitions and training data features adapted from open-source public Kaggle financial datasets:
+
+- **Primary Open Source Dataset**: [Kaggle: Money Laundering Transaction Dataset](https://www.kaggle.com/datasets/ealenahmed/money-laundering-transaction-data) / [Kaggle: PaySim Synthetic Financial Dataset](https://www.kaggle.com/datasets/ealams/paysim1).
+- **Dataset License**: Open Data Commons Attribution License (ODC-By) / Public Domain.
+- **Sourcing Protocol**: Sourced from public Kaggle repositories; preprocessed and formatted into relational customer and transaction tables with zero proprietary or confidential data.
+
+---
+
 ## 🏛️ System Architecture & Agentic Flow
 
 ```
@@ -65,9 +75,7 @@ Financial institutions globally are mandated by regulatory bodies (FinCEN, FATF,
 
 ---
 
-## 📊 Dataset & Schema Information
-
-The repository includes a synthetic dataset generator (`data_generator.py`) that creates relational banking tables with embedded money laundering patterns (Structuring & Rapid Velocity Cash-outs).
+## 📊 Dataset Schema Information
 
 ### 1. `customers.csv`
 - `customer_id` (STRING, Primary Key) — Unique Customer Identifier (e.g., `CUST-4521`).
@@ -100,7 +108,7 @@ The repository includes a synthetic dataset generator (`data_generator.py`) that
 pip install -r requirements.txt
 ```
 
-### Step 2: Generate Synthetic AML Dataset
+### Step 2: Generate / Seed Open Source AML Dataset
 ```bash
 python data_generator.py
 ```
