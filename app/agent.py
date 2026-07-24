@@ -20,6 +20,7 @@ class AMLAgentOrchestrator:
     Query-Driven Agent Orchestrator.
     Parses user query, constructs dynamic Tool Execution Plan (Tool DAG),
     invokes relevant tools selectively, and records telemetry log.
+    Data-driven & Zero Hardcoded Subject Dependencies.
     """
     def __init__(self, data_dir: str = "/Users/sterlingsuman/Desktop/projectx/data"):
         self.data_dir = data_dir
@@ -38,10 +39,17 @@ class AMLAgentOrchestrator:
         # Load merged Kaggle IBM AML + PaySim dataset tables
         self.df_transactions, self.df_customers = load_and_merge_kaggle_datasets(self.data_dir)
 
-        # Pre-compute feature & anomaly baseline
+        # Pre-compute feature & anomaly baseline dynamically
         self.df_features = self.feature_tool.run(self.df_transactions)
         self.df_scored = self.anomaly_tool.run(self.df_features)
         self.df_classified = self.classifier_tool.run(self.df_scored)
+
+    def _get_top_suspicious_customer_id(self) -> str:
+        """Dynamically picks top suspicious subject from the loaded dataset."""
+        if not self.df_classified.empty:
+            sorted_df = self.df_classified.sort_values(by="composite_risk_score", ascending=False)
+            return str(sorted_df.iloc[0]["customer_id"])
+        return "CUST-0001"
 
     def _clean_records(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Utility to convert DataFrame to dict records replacing NaN/Inf with JSON-compliant defaults."""
@@ -82,10 +90,11 @@ class AMLAgentOrchestrator:
                 "1. Display system capabilities & query taxonomy",
                 "2. Provide sample queries across Structuring, Entity Lookup, Threshold Aggregation, EDA, and Jurisdiction Analysis"
             ]
+            top_cid = self._get_top_suspicious_customer_id()
             exp = (
                 "<strong>SENTINEL-AML Capabilities & Command Taxonomy:</strong><br>"
                 "• <strong>Structuring & Smurfing Search:</strong> <em>'Find structuring patterns in last 30 days'</em> or <em>'10+ txns under $10,000'</em><br>"
-                "• <strong>Entity Risk Lookup:</strong> <em>'Is CUST-4521 suspicious?'</em> or <em>'Explain risk for customer 1089'</em><br>"
+                f"• <strong>Entity Risk Lookup:</strong> <em>'Is {top_cid} suspicious?'</em> or <em>'Explain risk for customer {top_cid.replace('CUST-', '')}'</em><br>"
                 "• <strong>Large Volume Filters:</strong> <em>'Transactions above $50,000'</em> or <em>'Volume over $100k'</em><br>"
                 "• <strong>Jurisdiction Analysis:</strong> <em>'Show transactions in FATF high risk countries'</em> (KY, PA, AE)<br>"
                 "• <strong>Channel / Wire Breakdown:</strong> <em>'Summarize wire transfers'</em> or <em>'Show cash out transactions'</em><br>"
@@ -95,7 +104,7 @@ class AMLAgentOrchestrator:
             output_payload["explanations"].append(exp)
 
         elif intent == "EXPLAIN_RISK_REASON":
-            cid = entities.get("customer_id") or "CUST-4521"
+            cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
             tools_called.extend(["SingleEntityLookupTool", "RiskClassifierTool"])
             tools_skipped.extend(["EDATool", "ThresholdStressTestTool"])
             execution_plan = [
@@ -111,17 +120,18 @@ class AMLAgentOrchestrator:
                 c = lookup_data["customer"]
                 reasons = []
                 if r.get("structuring_count", 0) > 0:
-                    reasons.append(f"• <strong>Structuring Activity:</strong> {r['structuring_count']} cash deposits in the $9,000–$9,999 band.")
+                    reasons.append(f"• <strong>Structuring Activity:</strong> {r['structuring_count']} cash deposits in structuring band.")
                 if r.get("rapid_cashout_count", 0) > 0:
                     reasons.append(f"• <strong>Rapid Cash-Out Velocity:</strong> {r['rapid_cashout_count']} immediate withdrawals following large wire/deposit within 2 hours.")
                 if r.get("high_risk_country_tx_count", 0) > 0:
                     reasons.append(f"• <strong>FATF High-Risk Jurisdiction:</strong> {r['high_risk_country_tx_count']} transactions involving off-shore codes (KY, PA, AE).")
-                if r.get("ml_anomaly_score", 0) > 0.5:
-                    reasons.append(f"• <strong>ML Anomaly Detection:</strong> Isolation Forest algorithm flagged anomalous behavior (ML score: {round(r['ml_anomaly_score'], 2)}).")
+                if r.get("ml_score", 0) > 50.0:
+                    reasons.append(f"• <strong>ML Anomaly Detection:</strong> Isolation Forest algorithm flagged anomalous behavior (ML score: {r['ml_score']}/100).")
                 
                 reason_text = "<br>".join(reasons) if reasons else "• Standard low-risk profile with normal transaction velocity."
+                cust_name = c.get("customer_name") or c.get("customer_id") or cid
                 exp = (
-                    f"<strong>Risk Factor Decomposition for {cid} ({c.get('customer_name')}):</strong><br>"
+                    f"<strong>Risk Factor Decomposition for {cid} ({cust_name}):</strong><br>"
                     f"Composite Risk Score: <strong>{r.get('composite_risk_score')}/100 ({r.get('risk_level')} RISK)</strong><br>"
                     f"Recommended Action: <strong>{r.get('recommended_action')}</strong><br><br>"
                     f"{reason_text}"
@@ -133,7 +143,7 @@ class AMLAgentOrchestrator:
                     output_payload["sar_narrative"] = sar_text
 
         elif intent == "SINGLE_ENTITY_LOOKUP":
-            cid = entities.get("customer_id") or "CUST-4521"
+            cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
             tools_called.extend(["SingleEntityLookupTool", "RiskClassifierTool", "SARGeneratorTool"])
             tools_skipped.extend(["EDATool", "DatasetWideMLTool", "ThresholdStressTestTool"])
             
@@ -153,11 +163,12 @@ class AMLAgentOrchestrator:
                 cust_info = lookup_data["customer"]
                 tx_hist = lookup_data["transaction_history"]
                 
+                cust_name = cust_info.get('customer_name') or cust_info.get('customer_id') or cid
                 exp_str = (
-                    f"Customer <strong>{cid}</strong> ({cust_info.get('customer_name')}) has a Risk Score of "
+                    f"Customer <strong>{cid}</strong> ({cust_name}) has a Risk Score of "
                     f"<strong>{risk_prof.get('composite_risk_score')}/100 ({risk_prof.get('risk_level')} RISK)</strong>. "
                     f"Recommended Action: <strong>{risk_prof.get('recommended_action')}</strong>. "
-                    f"Detected {risk_prof.get('structuring_count')} transactions in the structuring band ($9,000-$9,999)."
+                    f"Detected {risk_prof.get('structuring_count')} transactions in the structuring band."
                 )
                 output_payload["explanations"].append(exp_str)
                 
@@ -172,7 +183,7 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["EDATool", "SingleEntityLookupTool", "ThresholdStressTestTool"])
 
             execution_plan = [
-                "1. Filter for transactions in Structuring & Smurfing patterns ($9,000 - $9,999 band)",
+                "1. Filter for transactions in Structuring & Smurfing patterns",
                 "2. Aggregate customer rolling transaction frequencies (AMLFeatureEngTool)",
                 "3. Execute IsolationForest ML anomaly detector & Structuring Rule Engine (HybridAnomalyTool)",
                 "4. Classify high-risk subjects & assign escalation recommendations (RiskClassifierTool)",
@@ -180,16 +191,19 @@ class AMLAgentOrchestrator:
             ]
 
             flagged = self.df_classified[self.df_classified["structuring_count"] > 0].sort_values(by="composite_risk_score", ascending=False)
+            if flagged.empty:
+                flagged = self.df_classified.sort_values(by="composite_risk_score", ascending=False).head(10)
+
             merged_flagged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
             output_payload["results"]["flagged_table"] = self._clean_records(merged_flagged)
 
             top_subj = merged_flagged.iloc[0] if not merged_flagged.empty else None
             if top_subj is not None:
-                name_str = top_subj['customer_name'] if pd.notna(top_subj['customer_name']) else "Subject"
+                name_str = top_subj['customer_name'] if ('customer_name' in top_subj and pd.notna(top_subj['customer_name'])) else top_subj['customer_id']
                 exp_str = (
-                    f"Identified <strong>{len(flagged)} subjects</strong> exhibiting structuring patterns ($9,000–$9,999 cash deposits). "
+                    f"Identified <strong>{len(flagged)} subjects</strong> exhibiting structuring patterns. "
                     f"Top Subject: <strong>{top_subj['customer_id']}</strong> ({name_str}) with "
-                    f"<strong>{top_subj['structuring_count']} cash deposits</strong> under $10,000 (Risk Score: {top_subj['composite_risk_score']}/100)."
+                    f"<strong>{top_subj['structuring_count']} cash deposits</strong> under statutory limit (Risk Score: {top_subj['composite_risk_score']}/100)."
                 )
                 output_payload["explanations"].append(exp_str)
                 
@@ -202,7 +216,7 @@ class AMLAgentOrchestrator:
                 output_payload["sar_narrative"] = sar_text
 
         elif intent == "LARGE_AMOUNT_FILTER":
-            min_amt = entities.get("min_amount") or 50000.0
+            min_amt = entities.get("min_amount") or (self.df_transactions["amount"].quantile(0.95))
             tools_called.extend(["AMLFeatureEngTool", "LargeAmountFilterTool"])
             tools_skipped.extend(["EDATool", "SARGeneratorTool"])
 
@@ -284,7 +298,7 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["SingleEntityLookupTool"])
 
             execution_plan = [
-                "1. Aggregate Risk Rating distribution across all 500 active customer profiles",
+                "1. Aggregate Risk Rating distribution across all active customer profiles",
                 f"2. Filter for {risk_flt} risk category",
                 "3. Calculate population percentages and escalation actions"
             ]
@@ -301,15 +315,15 @@ class AMLAgentOrchestrator:
 
             exp = (
                 f"<strong>Customer Population Risk Breakdown ({tot_cnt} total subjects):</strong><br>"
-                f"• <strong>HIGH Risk:</strong> {high_cnt} subjects ({round(high_cnt/tot_cnt*100, 1)}%) — Immediate SAR Filing Required<br>"
-                f"• <strong>MEDIUM Risk:</strong> {med_cnt} subjects ({round(med_cnt/tot_cnt*100, 1)}%) — Enhanced Due Diligence (EDD)<br>"
-                f"• <strong>LOW Risk:</strong> {low_cnt} subjects ({round(low_cnt/tot_cnt*100, 1)}%) — Standard Monitoring"
+                f"• <strong>HIGH Risk:</strong> {high_cnt} subjects ({round(high_cnt/tot_cnt*100 if tot_cnt > 0 else 0, 1)}%) — Immediate SAR Filing Required<br>"
+                f"• <strong>MEDIUM Risk:</strong> {med_cnt} subjects ({round(med_cnt/tot_cnt*100 if tot_cnt > 0 else 0, 1)}%) — Enhanced Due Diligence (EDD)<br>"
+                f"• <strong>LOW Risk:</strong> {low_cnt} subjects ({round(low_cnt/tot_cnt*100 if tot_cnt > 0 else 0, 1)}%) — Standard Monitoring"
             )
             output_payload["explanations"].append(exp)
 
         elif intent == "THRESHOLD_AGGREGATION":
-            min_count = entities.get("min_count") or 10
-            max_amt = entities.get("max_amount") or 10000.0
+            min_count = entities.get("min_count") or 5
+            max_amt = entities.get("max_amount") or (self.df_transactions["amount"].max() * 0.99)
             
             tools_called.extend(["AMLFeatureEngTool", "ThresholdAggregationTool"])
             tools_skipped.extend(["EDATool", "IsolationForestMLTool", "SARGeneratorTool"])

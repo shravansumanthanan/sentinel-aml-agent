@@ -1,11 +1,10 @@
-import os
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List
 from sklearn.ensemble import IsolationForest
 
 class EDATool:
-    """Performs automated exploratory data analysis and summary statistics."""
+    """Performs automated exploratory data analysis and summary statistics on loaded datasets."""
     def run(self, df_tx: pd.DataFrame, df_cust: pd.DataFrame) -> Dict[str, Any]:
         total_tx = len(df_tx)
         total_volume = float(df_tx["amount"].sum())
@@ -15,7 +14,7 @@ class EDATool:
         
         tx_type_dist = df_tx["transaction_type"].value_counts().to_dict()
         channel_dist = df_tx["channel"].value_counts().to_dict()
-        risk_dist = df_cust["risk_rating"].value_counts().to_dict()
+        risk_dist = df_cust["risk_rating"].value_counts().to_dict() if "risk_rating" in df_cust.columns else {}
         
         top_cust = df_tx.groupby("customer_id")["amount"].agg(["sum", "count"]).reset_index()
         top_cust = top_cust.sort_values(by="sum", ascending=False).head(5).to_dict(orient="records")
@@ -38,11 +37,17 @@ class EDATool:
 
 
 class AMLFeatureEngTool:
-    """Engineers AML features: rolling velocity, structuring ratio, high-risk country volume, fan-in counts."""
+    """Engineers AML features dynamically from transaction dataset distributions."""
     def run(self, df_tx: pd.DataFrame, time_window_days: int = 30) -> pd.DataFrame:
         df = df_tx.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         
+        # Determine dynamic structuring threshold relative to dataset max transaction amount
+        max_amt = df["amount"].max()
+        ctr_limit = 10000.0 if max_amt >= 10000.0 else max_amt * 0.95
+        lower_struct_limit = ctr_limit * 0.90
+        upper_struct_limit = ctr_limit * 0.999
+
         # 1. Customer level aggregation
         cust_stats = df.groupby("customer_id").agg(
             total_tx_count=("transaction_id", "count"),
@@ -53,8 +58,8 @@ class AMLFeatureEngTool:
         ).reset_index()
         cust_stats["std_amount"] = cust_stats["std_amount"].fillna(0)
 
-        # 2. Structuring Band Count ($9,000 - $9,999)
-        struct_band = df[(df["amount"] >= 9000.0) & (df["amount"] <= 9999.0)]
+        # 2. Dynamic Structuring Band Count (90% to 99.9% of CTR threshold)
+        struct_band = df[(df["amount"] >= lower_struct_limit) & (df["amount"] <= upper_struct_limit)]
         struct_counts = struct_band.groupby("customer_id").size().reset_index(name="structuring_count")
 
         # 3. Merge features back
@@ -78,7 +83,7 @@ class AMLFeatureEngTool:
         features = pd.merge(features, rapid_counts, on="customer_id", how="left")
         features["rapid_cashout_count"] = features["rapid_cashout_count"].fillna(0).astype(int)
 
-        # 5. High-Risk Jurisdiction Feature (FATF Grey/Blacklist: KY, PA, AE)
+        # 5. High-Risk Jurisdiction Feature (FATF Grey/Blacklist)
         high_risk_jurisdictions = ["KY", "PA", "AE"]
         hr_txs = df[df["country_code"].isin(high_risk_jurisdictions)]
         hr_counts = hr_txs.groupby("customer_id").size().reset_index(name="high_risk_country_tx_count")
@@ -99,13 +104,13 @@ class AMLFeatureEngTool:
 
 class HybridAnomalyTool:
     """
-    Hybrid Anomaly Detector combining Isolation Forest (Unsupervised ML)
-    with Domain Rule Engines (Structuring, Rapid Velocity, High-Risk Country, & Fan-In rules).
+    Data-Driven Hybrid Anomaly Detector combining Isolation Forest (Unsupervised ML)
+    with Dataset-Dynamic Rule Evaluations.
     """
-    def run(self, df_features: pd.DataFrame, structuring_threshold: float = 9000.0) -> pd.DataFrame:
+    def run(self, df_features: pd.DataFrame) -> pd.DataFrame:
         df = df_features.copy()
         
-        # 1. Machine Learning Outlier Detection (Isolation Forest)
+        # 1. Dynamic Isolation Forest Outlier Detection
         feature_cols = [
             "total_tx_count", "total_tx_volume", "avg_amount", 
             "structuring_count", "rapid_cashout_count", 
@@ -113,28 +118,30 @@ class HybridAnomalyTool:
         ]
         X = df[feature_cols].fillna(0)
         
-        iso_model = IsolationForest(n_estimators=100, contamination=0.05, random_state=42)
+        # Compute dynamic contamination rate based on dataset outlier quantile
+        volume_95 = df["total_tx_volume"].quantile(0.95)
+        outlier_ratio = (df["total_tx_volume"] > volume_95).mean()
+        contamination = float(np.clip(outlier_ratio, 0.02, 0.15))
+
+        iso_model = IsolationForest(n_estimators=100, contamination=contamination, random_state=42)
         df["iso_forest_anomaly_score"] = -iso_model.fit_predict(X)
         scores = iso_model.decision_function(X)
-        df["ml_score"] = np.round((scores.max() - scores) / (scores.max() - scores.min() + 1e-6) * 100, 1)
-
-        # 2. Rule Engine Evaluation
-        # Rule 1: Structuring (5+ transactions in Structuring band)
-        df["rule_structuring"] = df["structuring_count"] >= 5
         
-        # Rule 2: Velocity Spike (Rapid cashouts >= 2)
-        df["rule_velocity"] = df["rapid_cashout_count"] >= 2
+        # Min-Max Normalization of ML Anomaly Score to [0, 100]
+        score_range = scores.max() - scores.min()
+        if score_range > 0:
+            df["ml_score"] = np.round((scores.max() - scores) / score_range * 100, 1)
+        else:
+            df["ml_score"] = 50.0
 
-        # Rule 3: High Volume Cash Trap
-        df["rule_high_volume"] = (df["total_tx_volume"] > 100000.0) & (df["structuring_count"] >= 3)
+        # 2. Dynamic Rule Engine Evaluation
+        df["rule_structuring"] = df["structuring_count"] >= 3
+        df["rule_velocity"] = df["rapid_cashout_count"] >= 1
+        vol_threshold = df["total_tx_volume"].quantile(0.85)
+        df["rule_high_volume"] = (df["total_tx_volume"] >= vol_threshold) & (df["structuring_count"] >= 1)
+        df["rule_high_risk_country"] = (df["high_risk_country_volume"] > 0.0)
+        df["rule_smurfing_fan_in"] = (df["distinct_destination_accounts"] >= 3) & (df["total_tx_count"] >= 4)
 
-        # Rule 4: High-Risk Jurisdiction Wire Rule (Transfers > $20k with KY/PA/AE)
-        df["rule_high_risk_country"] = (df["high_risk_country_volume"] >= 20000.0)
-
-        # Rule 5: Smurfing Fan-In Rule (4+ distinct accounts used in rapid pattern)
-        df["rule_smurfing_fan_in"] = (df["distinct_destination_accounts"] >= 4) & (df["total_tx_count"] >= 5)
-
-        # Combine Rule Hits
         df["rule_hits_count"] = (
             df["rule_structuring"].astype(int) + 
             df["rule_velocity"].astype(int) + 
@@ -143,28 +150,32 @@ class HybridAnomalyTool:
             df["rule_smurfing_fan_in"].astype(int)
         )
 
-        # Composite Risk Score Calculation (Hybrid)
-        df["composite_risk_score"] = np.clip(
-            df["ml_score"] * 0.35 + 
-            df["rule_hits_count"] * 25.0 + 
-            df["structuring_count"] * 4.0 + 
-            df["high_risk_country_tx_count"] * 10.0, 
-            0, 100
-        ).round(1)
+        # Dynamic Normalized Composite Score
+        # Combines ML score (40% weight) + Rule density & feature signals (60% weight)
+        rule_score = (df["rule_hits_count"] / 5.0) * 100.0
+        struct_signal = np.clip((df["structuring_count"] / 5.0) * 100.0, 0, 100)
+        hr_signal = np.clip((df["high_risk_country_tx_count"] / 3.0) * 100.0, 0, 100)
+
+        composite = (df["ml_score"] * 0.40) + (rule_score * 0.30) + (struct_signal * 0.15) + (hr_signal * 0.15)
+        df["composite_risk_score"] = np.clip(composite, 0, 100).round(1)
 
         return df
 
 
 class RiskClassifierTool:
-    """Categorizes score into Low, Medium, High Risk and assigns Escalation Action."""
+    """Categorizes composite scores dynamically into High, Medium, and Low Risk categories."""
     def run(self, df_scored: pd.DataFrame) -> pd.DataFrame:
         df = df_scored.copy()
         
+        # Calculate dynamic risk quantiles from dataset composite score distribution
+        p75 = df["composite_risk_score"].quantile(0.75)
+        p40 = df["composite_risk_score"].quantile(0.40)
+
         def classify(row):
             score = row["composite_risk_score"]
-            if score >= 75.0 or row["rule_hits_count"] >= 2:
+            if score >= p75 or row["rule_hits_count"] >= 2:
                 return "HIGH", "REPORT (File FinCEN SAR)"
-            elif score >= 45.0 or row["structuring_count"] >= 3 or row["rule_high_risk_country"]:
+            elif score >= p40 or row["structuring_count"] >= 1 or row["rule_high_risk_country"]:
                 return "MEDIUM", "FLAG FOR REVIEW (Senior Analyst)"
             else:
                 return "LOW", "MONITOR (Routine Check)"
@@ -198,7 +209,7 @@ class SingleEntityLookupTool:
 
 class ThresholdStressTestTool:
     """
-    (Lens 3 Feature) Scenario Stress Tester: Recalculates false positives and threat deltas
+    Scenario Stress Tester: Recalculates false positives and threat deltas dynamically
     when an analyst adjusts the structuring threshold amount.
     """
     def run(self, df_tx: pd.DataFrame, df_features: pd.DataFrame, lower_bound: float = 8500.0, upper_bound: float = 9999.0) -> Dict[str, Any]:
@@ -209,8 +220,8 @@ class ThresholdStressTestTool:
         merged = pd.merge(df_features, cust_band_counts, on="customer_id", how="left")
         merged["new_struct_count"] = merged["new_struct_count"].fillna(0).astype(int)
         
-        baseline_flagged = (df_features["structuring_count"] >= 5).sum()
-        new_flagged = (merged["new_struct_count"] >= 5).sum()
+        baseline_flagged = (df_features["structuring_count"] >= 3).sum()
+        new_flagged = (merged["new_struct_count"] >= 3).sum()
         
         delta = int(new_flagged - baseline_flagged)
 
@@ -220,14 +231,14 @@ class ThresholdStressTestTool:
             "baseline_flagged_customers": int(baseline_flagged),
             "new_flagged_customers": int(new_flagged),
             "customer_count_delta": delta,
-            "interpretation": f"Lowering the lower structuring bound to ${lower_bound:,.2f} identified {delta} additional high-risk subjects." if delta > 0 else "No change in flagged subjects under this threshold."
+            "interpretation": f"Lowering structuring bound to ${lower_bound:,.2f} flagged {delta} additional subjects from the dataset." if delta > 0 else "No change in flagged subjects under this threshold."
         }
 
 
 class SARGeneratorTool:
     """
-    (Lens 2 Feature) Regulatory FinCEN SAR Narrative Generator.
-    Produces formal human-readable FinCEN Suspicious Activity Report narratives.
+    Regulatory FinCEN SAR Narrative Generator.
+    Produces formal human-readable FinCEN Suspicious Activity Report narratives directly from subject data.
     """
     def generate_sar(self, customer_id: str, cust_data: Dict[str, Any], risk_profile: Dict[str, Any], tx_list: List[Dict[str, Any]]) -> str:
         name = cust_data.get("customer_name", customer_id)
@@ -249,21 +260,21 @@ Risk Rating: HIGH | Composite ML Risk Score: {risk_score}/100
 ================================================================================
 
 EXECUTIVE SUMMARY:
-Financial Institution Compliance Division is filing this Suspicious Activity Report (SAR) regarding suspicious transactional activity conducted by Subject {name} ({customer_id}) between June 2026 and July 2026. The Subject engaged in structured cash transactions designed to evade 31 C.F.R. § 1010.311 Currency Transaction Reporting (CTR) requirements, coupled with anomalous transaction velocity.
+Compliance Division is filing this Suspicious Activity Report (SAR) regarding anomalous transactional activity conducted by Subject {name} ({customer_id}). The Subject engaged in structured cash transactions designed to evade Currency Transaction Reporting (CTR) requirements, coupled with anomalous transaction velocity.
 
 DETAILED PATTERN ANALYSIS:
-1. STRUCTURING / SMURFING PATTERN:
-   The Subject conducted {struct_count} discrete transactions falling within the $9,000.00 to $9,999.00 threshold band, accumulating a total volume of ${total_vol:,.2f}. The transactions occurred in rapid succession at branch teller windows. The pattern indicates deliberate structuring to remain below the mandatory $10,000.00 CTR reporting threshold.
+1. STRUCTURING PATTERN:
+   The Subject conducted {struct_count} discrete transactions in the structuring threshold band, accumulating a total volume of ${total_vol:,.2f}. The pattern indicates deliberate structuring to remain below statutory reporting limits.
 
 2. RAPID VELOCITY & CASHOUT SPIKES:
-   The subject's account exhibited {rapid_cashout} rapid cash-out events (incoming wire/deposit followed by immediate cash withdrawal within 120 minutes), presenting high risk of money laundering layering.
+   The subject's account exhibited {rapid_cashout} rapid cash-out events (incoming deposit/wire followed by immediate withdrawal within 120 minutes), presenting high risk of money laundering layering.
 
 3. HIGH-RISK JURISDICTION EXPOSURE:
-   Transferred ${hr_vol:,.2f} involving FATF high-risk jurisdictions (Cayman Islands, Panama, UAE), triggering mandatory compliance review.
+   Transferred ${hr_vol:,.2f} involving FATF high-risk jurisdictions (KY, PA, AE), triggering mandatory compliance escalation.
 
 RECOMMENDED REGULATORY ACTION:
 - Status: MANDATORY REPORTING (SAR FILING REQUIRED)
-- Immediate Action: Escalate to Anti-Money Laundering Officer (AMLO) for account freeze & 30-day monitoring.
+- Action: Escalate to Anti-Money Laundering Officer (AMLO) for account freeze & 30-day monitoring.
 ================================================================================
 """.strip()
         return narrative
