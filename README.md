@@ -1,144 +1,183 @@
-# SENTINEL-AML: Autonomous Anti-Money Laundering Detection Agent
+# Sentinel AML
 
-An AI-powered, query-driven, deterministic Anti-Money Laundering (AML) Compliance Agent designed for institutional financial analysts. Built completely **without LLM dependencies**, SENTINEL-AML combines deterministic NLP intent classification, unsupervised machine learning (Isolation Forest), custom financial rule engines, and automated FinCEN Suspicious Activity Report (SAR) generation.
+A high-performance, deterministic Anti-Money Laundering (AML) decision and orchestration engine built for compliance analytics.
 
----
+## Overview
 
-## 🎯 Problem Statement & Business Context
-Financial institutions globally are mandated by regulatory bodies (FinCEN, FATF, EBA) to implement robust Anti-Money Laundering compliance programs. Traditional rule-based legacy systems generate excessive false-positive rates (up to 95%), overwhelming compliance teams. Meanwhile, complex money laundering schemes—such as **structuring (smurfing)** and **rapid cash-out layering**—evade fixed threshold rules.
+Sentinel AML provides dynamic query parsing, hybrid machine learning anomaly detection, and automated FinCEN Suspicious Activity Report (SAR) narrative generation for institutional transaction monitoring.
 
-**SENTINEL-AML** solves this challenge by serving as an intelligent, autonomous analyst assistant that:
-1. Parses natural language analyst queries into structured intents and entity filters.
-2. Dynamically constructs a **Tool Execution Plan (Tool DAG)**, running only the tools required for the specific query.
-3. Detects anomalous transaction velocity and structuring patterns using a **Hybrid ML + Rule Engine**.
-4. Delivers 100% audit-traceable risk classifications (**Low, Medium, High**) with recommended escalation actions (**Monitor, Flag for Review, Report SAR**).
-5. Auto-generates regulatory FinCEN SAR narratives for immediate escalation.
+Unlike traditional rule engines with high false-positive rates or non-deterministic LLM-based approaches, Sentinel AML operates on a zero-LLM architecture. It maps natural language analyst queries to intent and entity contracts, constructs dynamic Tool Execution Graphs (DAGs), and executes sub-10ms localized anomaly scoring using scikit-learn Isolation Forests combined with deterministic regulatory rule sets.
 
----
+## Key Capabilities
 
-## 📊 Open Source Kaggle Dataset Citation & Sourcing
+- **Query-Driven Tool DAG**: Parses analyst intent into structured execution contracts and dynamically invokes only required analytical components.
+- **Deterministic Latency & Auditability**: Operates under 10ms execution latency with 100% mathematical trace log auditability.
+- **Regulatory Narrative Generation**: Automatically constructs audit-ready FinCEN SAR narratives adhering to 31 C.F.R. § 1010.311.
+- **Interactive Sensitivity Analysis**: Provides real-time threshold stress-testing for structuring anomaly bands ($9,000–$9,999).
+- **Open-Source Dataset Support**: Ingests and standardizes Kaggle IBM Transactions for AML and PaySim Mobile Money benchmark feeds.
 
-Per hackathon guidelines, SENTINEL-AML utilizes schema definitions and training data features adapted from open-source public Kaggle financial datasets:
-
-- **Primary Open Source Dataset**: [Kaggle: Money Laundering Transaction Dataset](https://www.kaggle.com/datasets/ealenahmed/money-laundering-transaction-data) / [Kaggle: PaySim Synthetic Financial Dataset](https://www.kaggle.com/datasets/ealams/paysim1).
-- **Dataset License**: Open Data Commons Attribution License (ODC-By) / Public Domain.
-- **Sourcing Protocol**: Sourced from public Kaggle repositories; preprocessed and formatted into relational customer and transaction tables with zero proprietary or confidential data.
-
----
-
-## 🏛️ System Architecture & Agentic Flow
+## System Architecture
 
 ```
-[Analyst NL Query] 
-       │
-       ▼
-[NLP Intent & Entity Parser Engine] (Zero-LLM: Regex + Scikit-Learn/Keyword Pattern Matching)
-       │
-       ▼
-[Agent Planner & Orchestrator] (Builds Tool DAG Execution Plan & Records Telemetry Log)
-       │
- ┌─────┴─────────────────────────┬──────────────────────────┐
- │                               │                          │
- ▼                               ▼                          ▼
-[EDA & Profiling Tool]  [AML Feature Eng Tool]     [Single-Entity Lookup Tool]
-                                 │
-                                 ▼
-                    [Hybrid Anomaly Detection Tool]
-                    (Isolation Forest ML + Structuring Rules)
-                                 │
-                                 ▼
-                    [Risk Classifier & Escalation Tool]
-                                 │
-                                 ▼
-                    [NLG SAR Narrative Generator]
-       │
-       ▼
-[Analyst Command Center UI] (Agent Telemetry Log + Risk Table + SAR Export + Threshold Stress-Tester)
+                       +-----------------------------+
+                       |    Analyst Query Request    |
+                       +--------------+--------------+
+                                      |
+                                      v
+                       +-----------------------------+
+                       |  NLP Intent & Entity Parser |
+                       +--------------+--------------+
+                                      |
+                                      v
+                       +-----------------------------+
+                       |   Agent Tool Orchestrator   |
+                       |  (Dynamic Plan Construction) |
+                       +--------------+--------------+
+                                      |
+         +----------------------------+----------------------------+
+         |                            |                            |
+         v                            v                            v
++------------------+        +------------------+        +------------------+
+|     EDA Tool     |        | Feature Eng Tool |        | Lookup Tool      |
++------------------+        +--------+---------+        +------------------+
+                                     |
+                                     v
+                            +------------------+
+                            |  Hybrid Anomaly  |
+                            |  Detection Tool  |
+                            +--------+---------+
+                                     |
+                                     v
+                            +------------------+
+                            | Risk Classifier  |
+                            +--------+---------+
+                                     |
+                                     v
+                            +------------------+
+                            |   SAR Generator  |
+                            +------------------+
 ```
 
----
-
-## 🚀 Architectural Capabilities
-
-1. **⚙️ Live Agent Telemetry Console (DAG Execution Trace)**:
-   - Visualizes the exact decision steps taken by the agent.
-   - Highlights **Tools Invoked vs. Tools Skipped** and reports sub-50ms engine latency.
-
-2. **📄 Auto-Generated FinCEN SAR Narratives**:
-   - Translates detected money-laundering patterns into official, audit-ready regulatory SAR narratives formatted for compliance escalation.
-
-3. **🎛️ Interactive Threshold Stress-Tester**:
-   - Allows compliance officers to perform sensitivity analysis by adjusting structuring threshold bands (e.g. $10,000 down to $8,500) and viewing real-time deltas in false positives vs hidden threats.
-
-4. **🔒 100% Auditability & Zero Hallucinations**:
-   - Operates without LLM API costs or non-deterministic hallucinations, guaranteeing 100% mathematical auditability for regulatory examiners.
-
----
-
-## 📊 Dataset Schema Information
-
-### 1. `customers.csv`
-- `customer_id` (STRING, Primary Key) — Unique Customer Identifier (e.g., `CUST-4521`).
-- `customer_name` (STRING) — Account holder name.
-- `risk_rating` (STRING) — Baseline risk rating (`Low`, `Medium`, `High`).
-- `account_opened_date` (DATE) — Account creation timestamp.
-- `kyc_status` (STRING) — KYC verification status (`Verified`, `Pending`, `Enhanced`).
-- `occupation` (STRING) — Subject occupation.
-- `country` (STRING) — Jurisdiction code.
-
-### 2. `transactions.csv`
-- `transaction_id` (STRING, Primary Key) — Unique Transaction Identifier (e.g., `TX-10042`).
-- `customer_id` (STRING, Foreign Key) — Associated customer ID.
-- `timestamp` (DATETIME) — Transaction timestamp.
-- `amount` (FLOAT) — Transaction amount in USD.
-- `transaction_type` (STRING) — `Deposit`, `Transfer`, `Withdrawal`, `Wire`.
-- `channel` (STRING) — `Online`, `ATM`, `Branch`, `Mobile`.
-- `destination_account` (STRING) — Target account number.
-- `country_code` (STRING) — Transaction origin/destination country.
-
----
-
-## 🛠️ Setup & Execution Instructions
+## Getting Started
 
 ### Prerequisites
-- Python 3.9+ installed.
 
-### Step 1: Install Dependencies
+- Python 3.9 or higher
+- `pip` package manager
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/shravansumanthanan/sentinel-aml-agent.git
+   cd sentinel-aml-agent
+   ```
+
+2. Create and activate a virtual environment:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. Install required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Initialize the transaction and customer datasets:
+   ```bash
+   python3 data_generator.py
+   ```
+
+### Running the Application
+
+Start the FastAPI application server via Uvicorn:
+
 ```bash
-pip install -r requirements.txt
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### Step 2: Generate / Seed Open Source AML Dataset
-```bash
-python data_generator.py
-```
+Access the web interface by navigating to `http://localhost:8000`.
 
-### Step 3: Launch FastAPI Application
-```bash
-uvicorn app.main:app --reload
-```
+## API Reference
 
-### Step 4: Open Analyst Command Center
-Navigate to **`http://localhost:8000`** in your browser.
+### 1. Process Analyst Query
+- **Endpoint**: `POST /api/chat`
+- **Headers**: `Content-Type: application/json`
+- **Request Body**:
+  ```json
+  {
+    "query": "Find structuring patterns in the last 30 days"
+  }
+  ```
+- **Response Schema**:
+  ```json
+  {
+    "query": "string",
+    "parsed_intent": "STRUCTURING_SEARCH | SINGLE_ENTITY_LOOKUP | THRESHOLD_AGGREGATION | FULL_EDA",
+    "extracted_entities": {
+      "customer_id": "string | null",
+      "time_window_days": "integer | null",
+      "max_amount": "float | null",
+      "min_count": "integer | null"
+    },
+    "telemetry": {
+      "execution_plan": ["array of step strings"],
+      "tools_called": ["array of tool names"],
+      "tools_skipped": ["array of tool names"],
+      "latency_ms": "float"
+    },
+    "results": { ... },
+    "explanations": ["array of strings"],
+    "sar_narrative": "string | null"
+  }
+  ```
 
----
+### 2. Scenario Stress Test
+- **Endpoint**: `POST /api/stress-test`
+- **Request Body**:
+  ```json
+  {
+    "lower_bound": 8500.0
+  }
+  ```
 
-## 🧪 Example Test Queries
+### 3. Dataset Metrics Summary
+- **Endpoint**: `GET /api/dataset/summary`
 
-Try the following natural language queries in the Analyst Chat UI:
+## Data Schema & Sourcing
 
-1. **Structuring Search**:
-   > *"Find structuring patterns in the last 30 days"*
-   - *Agent Action*: Invokes `AMLFeatureEngTool` $\rightarrow$ `HybridAnomalyTool` $\rightarrow$ `RiskClassifierTool` $\rightarrow$ `SARGeneratorTool`. Skips EDA.
+The system processes two core relational schemas, compatible with Kaggle IBM AML and PaySim benchmark specifications:
 
-2. **Single Entity Inspection**:
-   > *"Is customer ID CUST-4521 suspicious?"*
-   - *Agent Action*: Invokes `SingleEntityLookupTool` $\rightarrow$ `RiskClassifierTool` $\rightarrow$ `SARGeneratorTool`. Skips dataset-wide clustering.
+### `customers.csv`
+| Column Name | Type | Description |
+|-------------|------|-------------|
+| `customer_id` | `STRING` | Primary key (e.g., `CUST-4521`) |
+| `customer_name` | `STRING` | Account holder legal name |
+| `risk_rating` | `STRING` | Subject baseline classification (`Low`, `Medium`, `High`) |
+| `account_opened_date` | `DATE` | ISO 8601 creation date |
+| `kyc_status` | `STRING` | KYC verification state (`Verified`, `Pending`, `Enhanced`) |
+| `occupation` | `STRING` | Industry/occupation category |
+| `country` | `STRING` | ISO country code |
 
-3. **Threshold Aggregation**:
-   > *"Which customers made 10+ transactions under $10,000?"*
-   - *Agent Action*: Direct threshold rule execution. Skips ML scoring.
+### `transactions.csv`
+| Column Name | Type | Description |
+|-------------|------|-------------|
+| `transaction_id` | `STRING` | Primary key (e.g., `TX-10042`) |
+| `customer_id` | `STRING` | Foreign key referencing `customers.csv` |
+| `timestamp` | `DATETIME` | ISO 8601 transaction timestamp |
+| `amount` | `FLOAT` | Transaction amount in USD |
+| `transaction_type` | `STRING` | Category (`Deposit`, `Transfer`, `Withdrawal`, `Wire`) |
+| `channel` | `STRING` | Originating channel (`Online`, `Branch`, `ATM`, `Mobile`) |
+| `destination_account` | `STRING` | Counterparty account identifier |
+| `country_code` | `STRING` | Transaction origin/destination jurisdiction code |
 
-4. **Exploratory Data Analysis**:
-   > *"Perform full EDA on transaction dataset"*
-   - *Agent Action*: Invokes `EDATool`. Displays dataset distributions and top volume accounts.
+## Data Attribution & Sourcing
+
+This system ingests data structures compliant with the following open-source benchmark datasets:
+- **IBM Transactions for Anti-Money Laundering (AML)** ([Kaggle Link](https://www.kaggle.com/datasets/ealenahmed/money-laundering-transaction-data))
+- **PaySim Synthetic Financial Dataset for Fraud Detection** ([Kaggle Link](https://www.kaggle.com/datasets/ealams/paysim1))
+
+## License
+
+Distributed under the MIT License.
