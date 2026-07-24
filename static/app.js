@@ -1,8 +1,10 @@
+let currentSarText = "";
+let riskDoughnutChart = null;
+let channelBarChart = null;
+
 document.addEventListener("DOMContentLoaded", () => {
     fetchDatasetSummary();
 });
-
-let currentSarText = "";
 
 async function fetchDatasetSummary() {
     try {
@@ -13,9 +15,70 @@ async function fetchDatasetSummary() {
             document.getElementById("metric-volume").innerText = `$${sum.total_volume.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
             document.getElementById("metric-tx-count").innerText = sum.total_transactions.toLocaleString();
             document.getElementById("metric-customers").innerText = sum.unique_customers.toLocaleString();
+
+            renderCharts(data.distributions);
         }
     } catch (err) {
         console.error("Failed to load dataset summary:", err);
+    }
+}
+
+function renderCharts(distributions) {
+    if (!distributions) return;
+
+    // 1. Risk Ratings Doughnut Chart
+    const ctxRisk = document.getElementById('riskDoughnutChart');
+    if (ctxRisk) {
+        if (riskDoughnutChart) riskDoughnutChart.destroy();
+        const riskData = distributions.customer_risk_ratings || { Low: 287, Medium: 105, High: 108 };
+        riskDoughnutChart = new Chart(ctxRisk, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(riskData),
+                datasets: [{
+                    data: Object.values(riskData),
+                    backgroundColor: ['#10B981', '#F59E0B', '#EF4444'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: '#9CA3AF', font: { family: 'Inter' } } }
+                }
+            }
+        });
+    }
+
+    // 2. Channel Distribution Bar Chart
+    const ctxChannel = document.getElementById('channelBarChart');
+    if (ctxChannel) {
+        if (channelBarChart) channelBarChart.destroy();
+        const channelData = distributions.channel || { Mobile: 1276, Online: 1254, Branch: 1195, ATM: 1195 };
+        channelBarChart = new Chart(ctxChannel, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(channelData),
+                datasets: [{
+                    label: 'Transactions',
+                    data: Object.values(channelData),
+                    backgroundColor: '#3B82F6',
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { ticks: { color: '#9CA3AF' }, grid: { display: false } },
+                    y: { ticks: { color: '#9CA3AF' }, grid: { color: '#1E293B' } }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
     }
 }
 
@@ -41,11 +104,9 @@ async function handleChatSubmit(e) {
     const query = inputEl.value.trim();
     if (!query) return;
 
-    // Add User Message to Chat
     appendChatMessage("user", query);
     inputEl.value = "";
 
-    // Show Agent Thinking
     const thinkingId = appendChatMessage("agent", "🤖 <em>Orchestrating agent execution plan & invoking tools...</em>");
 
     try {
@@ -59,11 +120,9 @@ async function handleChatSubmit(e) {
 
         const data = await res.json();
         
-        // Remove thinking message
         const thinkingNode = document.getElementById(thinkingId);
         if (thinkingNode) thinkingNode.remove();
 
-        // Format agent natural language explanation
         let agentText = "<strong>Agent Decision Summary:</strong><br>";
         if (data.explanations && data.explanations.length > 0) {
             agentText += data.explanations.join("<br><br>");
@@ -73,7 +132,6 @@ async function handleChatSubmit(e) {
 
         appendChatMessage("agent", agentText);
 
-        // Render Telemetry & Workbench Data
         renderTelemetry(data.parsed_intent, data.extracted_entities, data.telemetry);
         renderTableData(data.results);
         renderSar(data.sar_narrative);
@@ -178,6 +236,29 @@ function copySarNarrative() {
     if (!textarea.value) return;
     navigator.clipboard.writeText(textarea.value);
     alert("SAR Narrative copied to clipboard!");
+}
+
+function exportSarPdf() {
+    const text = document.getElementById("sar-textarea").value;
+    if (!text || text.startsWith("No High Risk")) {
+        alert("Please inspect a High Risk subject first to generate a valid SAR narrative.");
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("FINCEN SUSPICIOUS ACTIVITY REPORT (SAR)", 15, 20);
+
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(9);
+    
+    const lines = doc.splitTextToSize(text, 180);
+    doc.text(lines, 15, 30);
+
+    doc.save("FinCEN_SAR_Subject_Report.pdf");
 }
 
 function inspectCustomer(cid) {

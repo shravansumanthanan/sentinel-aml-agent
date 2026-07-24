@@ -6,6 +6,9 @@
     <title>SENTINEL-AML | Autonomous Compliance Decision System</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Chart.js & jsPDF Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -77,6 +80,7 @@
             <section class="workbench-panel">
                 <div class="workbench-tabs">
                     <button class="tab-btn active" onclick="switchTab('telemetry')">⚙️ Agent Telemetry (DAG)</button>
+                    <button class="tab-btn" onclick="switchTab('analytics')">📊 Visual Analytics & Charts</button>
                     <button class="tab-btn" onclick="switchTab('table')">📋 Flagged Risk Table</button>
                     <button class="tab-btn" onclick="switchTab('sar')">📄 FinCEN SAR Generator</button>
                     <button class="tab-btn" onclick="switchTab('stresstest')">🎛️ Threshold Stress-Tester</button>
@@ -120,7 +124,25 @@
                         </div>
                     </div>
 
-                    <!-- Tab 2: Flagged Risk Table -->
+                    <!-- Tab 2: Visual Analytics -->
+                    <div class="tab-pane" id="pane-analytics">
+                        <div class="analytics-grid">
+                            <div class="chart-card">
+                                <h3>Risk Rating Distribution</h3>
+                                <div class="chart-wrapper">
+                                    <canvas id="riskDoughnutChart"></canvas>
+                                </div>
+                            </div>
+                            <div class="chart-card">
+                                <h3>Transaction Channel Distribution</h3>
+                                <div class="chart-wrapper">
+                                    <canvas id="channelBarChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: Flagged Risk Table -->
                     <div class="tab-pane" id="pane-table">
                         <div class="table-container">
                             <div class="table-header-bar">
@@ -148,18 +170,21 @@
                         </div>
                     </div>
 
-                    <!-- Tab 3: SAR Generator -->
+                    <!-- Tab 4: SAR Generator -->
                     <div class="tab-pane" id="pane-sar">
                         <div class="sar-box">
                             <div class="sar-header">
                                 <h3>FinCEN Suspicious Activity Report (SAR) Narrative</h3>
-                                <button class="secondary-btn" onclick="copySarNarrative()">📋 Copy Narrative</button>
+                                <div class="sar-actions">
+                                    <button class="secondary-btn" onclick="copySarNarrative()">📋 Copy Text</button>
+                                    <button class="primary-action-btn" onclick="exportSarPdf()">📄 Export PDF Report</button>
+                                </div>
                             </div>
                             <textarea id="sar-textarea" readonly placeholder="SAR Narrative will auto-generate here when a High Risk subject is inspected or flagged..."></textarea>
                         </div>
                     </div>
 
-                    <!-- Tab 4: Threshold Stress Tester -->
+                    <!-- Tab 5: Threshold Stress Tester -->
                     <div class="tab-pane" id="pane-stresstest">
                         <div class="stress-box">
                             <h3>🎛️ Interactive Structuring Threshold Stress-Tester</h3>

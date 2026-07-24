@@ -382,6 +382,31 @@ body {
 .green-text { color: #10B981; }
 .red-text { color: #EF4444; }
 
+/* Analytics Pane */
+.analytics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.chart-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.chart-card h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.chart-wrapper {
+    position: relative;
+    height: 280px;
+}
+
 /* Table Pane */
 .table-container {
     background: var(--bg-card);
@@ -454,6 +479,11 @@ body {
     margin-bottom: 16px;
 }
 
+.sar-actions {
+    display: flex;
+    gap: 8px;
+}
+
 .secondary-btn {
     background: #334155;
     color: white;
@@ -462,6 +492,21 @@ body {
     border-radius: 6px;
     font-size: 12px;
     cursor: pointer;
+}
+
+.primary-action-btn {
+    background: #10B981;
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.primary-action-btn:hover {
+    background: #059669;
 }
 
 #sar-textarea {
