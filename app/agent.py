@@ -1,6 +1,7 @@
 import time
 import os
 import pandas as pd
+import numpy as np
 from typing import Dict, Any, List
 from app.nlp_parser import NLPIntentParser
 from app.kaggle_loader import load_and_merge_kaggle_datasets
@@ -42,6 +43,17 @@ class AMLAgentOrchestrator:
         self.df_scored = self.anomaly_tool.run(self.df_features)
         self.df_classified = self.classifier_tool.run(self.df_scored)
 
+    def _clean_records(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """Utility to convert DataFrame to dict records replacing NaN/Inf with JSON-compliant defaults."""
+        df_copy = df.copy()
+        df_copy = df_copy.replace([np.inf, -np.inf], np.nan)
+        for col in df_copy.columns:
+            if df_copy[col].dtype == 'object':
+                df_copy[col] = df_copy[col].fillna("")
+            else:
+                df_copy[col] = df_copy[col].fillna(0)
+        return df_copy.to_dict(orient="records")
+
     def process_query(self, query: str) -> Dict[str, Any]:
         start_time = time.time()
         
@@ -63,7 +75,64 @@ class AMLAgentOrchestrator:
             "sar_narrative": None
         }
 
-        if intent == "SINGLE_ENTITY_LOOKUP":
+        if intent == "CAPABILITIES_HELP":
+            tools_called.append("CapabilitiesHelpTool")
+            tools_skipped.extend(["DatasetWideMLTool", "SARGeneratorTool"])
+            execution_plan = [
+                "1. Display system capabilities & query taxonomy",
+                "2. Provide sample queries across Structuring, Entity Lookup, Threshold Aggregation, EDA, and Jurisdiction Analysis"
+            ]
+            exp = (
+                "<strong>SENTINEL-AML Capabilities & Command Taxonomy:</strong><br>"
+                "• <strong>Structuring & Smurfing Search:</strong> <em>'Find structuring patterns in last 30 days'</em> or <em>'10+ txns under $10,000'</em><br>"
+                "• <strong>Entity Risk Lookup:</strong> <em>'Is CUST-4521 suspicious?'</em> or <em>'Explain risk for customer 1089'</em><br>"
+                "• <strong>Large Volume Filters:</strong> <em>'Transactions above $50,000'</em> or <em>'Volume over $100k'</em><br>"
+                "• <strong>Jurisdiction Analysis:</strong> <em>'Show transactions in FATF high risk countries'</em> (KY, PA, AE)<br>"
+                "• <strong>Channel / Wire Breakdown:</strong> <em>'Summarize wire transfers'</em> or <em>'Show cash out transactions'</em><br>"
+                "• <strong>Risk Count Summary:</strong> <em>'How many high risk customers do we have?'</em><br>"
+                "• <strong>Dataset EDA Overview:</strong> <em>'Perform full EDA on transaction dataset'</em>"
+            )
+            output_payload["explanations"].append(exp)
+
+        elif intent == "EXPLAIN_RISK_REASON":
+            cid = entities.get("customer_id") or "CUST-4521"
+            tools_called.extend(["SingleEntityLookupTool", "RiskClassifierTool"])
+            tools_skipped.extend(["EDATool", "ThresholdStressTestTool"])
+            execution_plan = [
+                f"1. Extract target Customer ID: {cid}",
+                "2. Lookup single entity profile & transaction history",
+                "3. Deconstruct composite risk score into constituent risk factors"
+            ]
+            lookup_data = self.single_lookup_tool.run(cid, self.df_transactions, self.df_customers, self.df_classified)
+            output_payload["results"]["single_lookup"] = lookup_data
+            
+            if lookup_data.get("found"):
+                r = lookup_data["risk_profile"]
+                c = lookup_data["customer"]
+                reasons = []
+                if r.get("structuring_count", 0) > 0:
+                    reasons.append(f"• <strong>Structuring Activity:</strong> {r['structuring_count']} cash deposits in the $9,000–$9,999 band.")
+                if r.get("rapid_cashout_count", 0) > 0:
+                    reasons.append(f"• <strong>Rapid Cash-Out Velocity:</strong> {r['rapid_cashout_count']} immediate withdrawals following large wire/deposit within 2 hours.")
+                if r.get("high_risk_country_tx_count", 0) > 0:
+                    reasons.append(f"• <strong>FATF High-Risk Jurisdiction:</strong> {r['high_risk_country_tx_count']} transactions involving off-shore codes (KY, PA, AE).")
+                if r.get("ml_anomaly_score", 0) > 0.5:
+                    reasons.append(f"• <strong>ML Anomaly Detection:</strong> Isolation Forest algorithm flagged anomalous behavior (ML score: {round(r['ml_anomaly_score'], 2)}).")
+                
+                reason_text = "<br>".join(reasons) if reasons else "• Standard low-risk profile with normal transaction velocity."
+                exp = (
+                    f"<strong>Risk Factor Decomposition for {cid} ({c.get('customer_name')}):</strong><br>"
+                    f"Composite Risk Score: <strong>{r.get('composite_risk_score')}/100 ({r.get('risk_level')} RISK)</strong><br>"
+                    f"Recommended Action: <strong>{r.get('recommended_action')}</strong><br><br>"
+                    f"{reason_text}"
+                )
+                output_payload["explanations"].append(exp)
+                
+                if r.get("risk_level") == "HIGH":
+                    sar_text = self.sar_tool.generate_sar(cid, c, r, lookup_data["transaction_history"])
+                    output_payload["sar_narrative"] = sar_text
+
+        elif intent == "SINGLE_ENTITY_LOOKUP":
             cid = entities.get("customer_id") or "CUST-4521"
             tools_called.extend(["SingleEntityLookupTool", "RiskClassifierTool", "SARGeneratorTool"])
             tools_skipped.extend(["EDATool", "DatasetWideMLTool", "ThresholdStressTestTool"])
@@ -85,9 +154,9 @@ class AMLAgentOrchestrator:
                 tx_hist = lookup_data["transaction_history"]
                 
                 exp_str = (
-                    f"Customer {cid} ({cust_info.get('customer_name')}) has a Risk Score of "
-                    f"{risk_prof.get('composite_risk_score')}/100 ({risk_prof.get('risk_level')} RISK). "
-                    f"Recommended Action: {risk_prof.get('recommended_action')}. "
+                    f"Customer <strong>{cid}</strong> ({cust_info.get('customer_name')}) has a Risk Score of "
+                    f"<strong>{risk_prof.get('composite_risk_score')}/100 ({risk_prof.get('risk_level')} RISK)</strong>. "
+                    f"Recommended Action: <strong>{risk_prof.get('recommended_action')}</strong>. "
                     f"Detected {risk_prof.get('structuring_count')} transactions in the structuring band ($9,000-$9,999)."
                 )
                 output_payload["explanations"].append(exp_str)
@@ -95,6 +164,8 @@ class AMLAgentOrchestrator:
                 if risk_prof.get("risk_level") == "HIGH":
                     sar_text = self.sar_tool.generate_sar(cid, cust_info, risk_prof, tx_hist)
                     output_payload["sar_narrative"] = sar_text
+            else:
+                output_payload["explanations"].append(f"Customer ID <strong>{cid}</strong> was not found in the active customer database.")
 
         elif intent == "STRUCTURING_SEARCH":
             tools_called.extend(["AMLFeatureEngTool", "HybridAnomalyTool", "RiskClassifierTool", "SARGeneratorTool"])
@@ -110,14 +181,15 @@ class AMLAgentOrchestrator:
 
             flagged = self.df_classified[self.df_classified["structuring_count"] > 0].sort_values(by="composite_risk_score", ascending=False)
             merged_flagged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
-            output_payload["results"]["flagged_table"] = merged_flagged.to_dict(orient="records")
+            output_payload["results"]["flagged_table"] = self._clean_records(merged_flagged)
 
             top_subj = merged_flagged.iloc[0] if not merged_flagged.empty else None
             if top_subj is not None:
+                name_str = top_subj['customer_name'] if pd.notna(top_subj['customer_name']) else "Subject"
                 exp_str = (
-                    f"Identified {len(flagged)} subjects exhibiting structuring patterns. "
-                    f"Top Subject: {top_subj['customer_id']} ({top_subj['customer_name']}) with "
-                    f"{top_subj['structuring_count']} cash deposits under $10,000 (Risk Score: {top_subj['composite_risk_score']}/100)."
+                    f"Identified <strong>{len(flagged)} subjects</strong> exhibiting structuring patterns ($9,000–$9,999 cash deposits). "
+                    f"Top Subject: <strong>{top_subj['customer_id']}</strong> ({name_str}) with "
+                    f"<strong>{top_subj['structuring_count']} cash deposits</strong> under $10,000 (Risk Score: {top_subj['composite_risk_score']}/100)."
                 )
                 output_payload["explanations"].append(exp_str)
                 
@@ -128,6 +200,112 @@ class AMLAgentOrchestrator:
                     self.df_transactions[self.df_transactions["customer_id"] == top_subj["customer_id"]].to_dict(orient="records")
                 )
                 output_payload["sar_narrative"] = sar_text
+
+        elif intent == "LARGE_AMOUNT_FILTER":
+            min_amt = entities.get("min_amount") or 50000.0
+            tools_called.extend(["AMLFeatureEngTool", "LargeAmountFilterTool"])
+            tools_skipped.extend(["EDATool", "SARGeneratorTool"])
+
+            execution_plan = [
+                f"1. Filter transaction ledger for entries with amount >= ${min_amt:,.2f}",
+                "2. Join customer metadata and compute aggregated transaction volume",
+                "3. Rank subjects by total large transaction volume"
+            ]
+
+            large_txs = self.df_transactions[self.df_transactions["amount"] >= min_amt]
+            large_cust_ids = large_txs["customer_id"].unique()
+            flagged = self.df_classified[self.df_classified["customer_id"].isin(large_cust_ids)].sort_values(by="total_tx_volume", ascending=False)
+            merged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
+            output_payload["results"]["flagged_table"] = self._clean_records(merged)
+
+            total_vol = large_txs["amount"].sum()
+            exp = (
+                f"Found <strong>{len(large_txs)} transactions</strong> exceeding <strong>${min_amt:,.2f}</strong> across "
+                f"<strong>{len(merged)} customers</strong>, representing <strong>${total_vol:,.2f}</strong> total high-value volume."
+            )
+            output_payload["explanations"].append(exp)
+
+        elif intent == "JURISDICTION_ANALYSIS":
+            target_cc = entities.get("country_code")
+            tools_called.extend(["JurisdictionAnalysisTool", "RiskClassifierTool"])
+            tools_skipped.extend(["SingleEntityLookupTool"])
+
+            execution_plan = [
+                "1. Filter transaction history for FATF Grey/Blacklist country codes (KY, PA, AE)",
+                "2. Aggregate volume and transaction counts per jurisdiction",
+                "3. Flag subjects with cross-border offshore transfers"
+            ]
+
+            high_risk_cc = ["KY", "PA", "AE"]
+            if target_cc:
+                tx_filtered = self.df_transactions[self.df_transactions["country_code"] == target_cc]
+                cust_ids = tx_filtered["customer_id"].unique()
+                flagged = self.df_classified[self.df_classified["customer_id"].isin(cust_ids)].sort_values(by="high_risk_country_volume", ascending=False)
+                exp = f"Found <strong>{len(tx_filtered)} transactions</strong> involving jurisdiction <strong>{target_cc}</strong> totaling <strong>${tx_filtered['amount'].sum():,.2f}</strong> across {len(flagged)} customers."
+            else:
+                tx_filtered = self.df_transactions[self.df_transactions["country_code"].isin(high_risk_cc)]
+                flagged = self.df_classified[self.df_classified["high_risk_country_tx_count"] > 0].sort_values(by="high_risk_country_volume", ascending=False)
+                exp = (
+                    f"Found <strong>{len(tx_filtered)} transactions</strong> in FATF High-Risk Jurisdictions (KY, PA, AE) "
+                    f"totaling <strong>${tx_filtered['amount'].sum():,.2f}</strong> across <strong>{len(flagged)} subjects</strong>."
+                )
+
+            merged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
+            output_payload["results"]["flagged_table"] = self._clean_records(merged)
+            output_payload["explanations"].append(exp)
+
+        elif intent == "TRANSACTION_TYPE_BREAKDOWN":
+            tx_type = entities.get("transaction_type") or "Wire"
+            tools_called.extend(["TransactionTypeFilterTool"])
+            tools_skipped.extend(["SARGeneratorTool"])
+
+            execution_plan = [
+                f"1. Filter dataset for transaction type: {tx_type}",
+                "2. Calculate total volume and count breakdown",
+                "3. Display customer rankings for this transaction channel"
+            ]
+
+            filtered_tx = self.df_transactions[self.df_transactions["transaction_type"].str.lower() == tx_type.lower()]
+            tot_vol = filtered_tx["amount"].sum()
+            cust_ids = filtered_tx["customer_id"].unique()
+            flagged = self.df_classified[self.df_classified["customer_id"].isin(cust_ids)].sort_values(by="total_tx_volume", ascending=False)
+            merged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
+            output_payload["results"]["flagged_table"] = self._clean_records(merged)
+
+            exp = (
+                f"Found <strong>{len(filtered_tx)} {tx_type} transactions</strong> totaling <strong>${tot_vol:,.2f}</strong> "
+                f"across {len(cust_ids)} unique customers."
+            )
+            output_payload["explanations"].append(exp)
+
+        elif intent == "COUNT_RISK_SUMMARY":
+            risk_flt = entities.get("risk_filter") or "HIGH"
+            tools_called.extend(["RiskClassifierTool", "EDATool"])
+            tools_skipped.extend(["SingleEntityLookupTool"])
+
+            execution_plan = [
+                "1. Aggregate Risk Rating distribution across all 500 active customer profiles",
+                f"2. Filter for {risk_flt} risk category",
+                "3. Calculate population percentages and escalation actions"
+            ]
+
+            counts = self.df_classified["risk_level"].value_counts().to_dict()
+            high_cnt = counts.get("HIGH", 0)
+            med_cnt = counts.get("MEDIUM", 0)
+            low_cnt = counts.get("LOW", 0)
+            tot_cnt = len(self.df_classified)
+
+            flagged = self.df_classified[self.df_classified["risk_level"] == risk_flt].sort_values(by="composite_risk_score", ascending=False)
+            merged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
+            output_payload["results"]["flagged_table"] = self._clean_records(merged)
+
+            exp = (
+                f"<strong>Customer Population Risk Breakdown ({tot_cnt} total subjects):</strong><br>"
+                f"• <strong>HIGH Risk:</strong> {high_cnt} subjects ({round(high_cnt/tot_cnt*100, 1)}%) — Immediate SAR Filing Required<br>"
+                f"• <strong>MEDIUM Risk:</strong> {med_cnt} subjects ({round(med_cnt/tot_cnt*100, 1)}%) — Enhanced Due Diligence (EDD)<br>"
+                f"• <strong>LOW Risk:</strong> {low_cnt} subjects ({round(low_cnt/tot_cnt*100, 1)}%) — Standard Monitoring"
+            )
+            output_payload["explanations"].append(exp)
 
         elif intent == "THRESHOLD_AGGREGATION":
             min_count = entities.get("min_count") or 10
@@ -148,9 +326,9 @@ class AMLAgentOrchestrator:
                 ((self.df_classified["total_tx_count"] >= min_count) & (self.df_classified["avg_amount"] < max_amt))
             ]
             merged = pd.merge(filtered_cust, self.df_customers, on="customer_id", how="left")
-            output_payload["results"]["flagged_table"] = merged.to_dict(orient="records")
+            output_payload["results"]["flagged_table"] = self._clean_records(merged)
             
-            exp_str = f"Found {len(merged)} customers making {min_count}+ transactions under ${max_amt:,.2f}."
+            exp_str = f"Found <strong>{len(merged)} customers</strong> making {min_count}+ transactions under ${max_amt:,.2f}."
             output_payload["explanations"].append(exp_str)
 
         elif intent == "FULL_EDA":
@@ -166,7 +344,7 @@ class AMLAgentOrchestrator:
 
             eda_res = self.eda_tool.run(self.df_transactions, self.df_customers)
             output_payload["results"]["eda"] = eda_res
-            exp_str = f"Dataset contains {eda_res['summary']['total_transactions']} transactions across {eda_res['summary']['unique_customers']} unique customers with ${eda_res['summary']['total_volume']:,.2f} total volume."
+            exp_str = f"Dataset contains <strong>{eda_res['summary']['total_transactions']} transactions</strong> across <strong>{eda_res['summary']['unique_customers']} unique customers</strong> with <strong>${eda_res['summary']['total_volume']:,.2f}</strong> total volume."
             output_payload["explanations"].append(exp_str)
 
         else:
@@ -174,16 +352,16 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["SingleEntityLookupTool"])
 
             execution_plan = [
-                "1. Parse general analytical request",
-                "2. Run batch AML feature extraction and Isolation Forest ML scoring",
-                "3. Filter high & medium risk subjects",
-                "4. Present top risk subjects with escalation guidance"
+                "1. Parse general analytical query",
+                "2. Execute batch AML feature extraction and Isolation Forest ML scoring",
+                "3. Filter high & medium risk subjects requiring analyst review",
+                "4. Present top suspicious subjects with escalation guidance"
             ]
             
             high_risk = self.df_classified[self.df_classified["risk_level"].isin(["HIGH", "MEDIUM"])].sort_values(by="composite_risk_score", ascending=False)
             merged = pd.merge(high_risk, self.df_customers, on="customer_id", how="left")
-            output_payload["results"]["flagged_table"] = merged.to_dict(orient="records")
-            exp_str = f"Detected {len(high_risk)} suspicious subjects requiring analyst review."
+            output_payload["results"]["flagged_table"] = self._clean_records(merged)
+            exp_str = f"Query Analyzed: Returned <strong>{len(high_risk)} suspicious subjects</strong> matching analytical criteria. View flagged risk table for details."
             output_payload["explanations"].append(exp_str)
 
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
