@@ -84,11 +84,12 @@ class NLPIntentParser:
         if country_match:
             entities["country_code"] = country_match.group(1).upper()
 
-        # 9. Intent Classification Logic (Strict Precedence)
-        if "help" in query_lower or "what can you do" in query_lower or "capabilities" in query_lower or "command" in query_lower:
-            intent = "CAPABILITIES_HELP"
-        elif "highest" in query_lower or "top risk" in query_lower or "most suspicious" in query_lower or "highest score" in query_lower or "highest risk" in query_lower or "who is risk" in query_lower or "which customer is having" in query_lower:
+        # 9. Intent Classification Logic (Strict Keyword & Superlative Priority)
+        top_risk_keywords = ["highest", "top risk", "most suspicious", "highest score", "highest risk", "max risk", "top customer", "most risk", "highest risk score", "worst score"]
+        if any(k in query_lower for k in top_risk_keywords) or ("who" in query_lower and "risk" in query_lower) or ("which" in query_lower and "highest" in query_lower):
             intent = "TOP_RISK_SUBJECT"
+        elif "help" in query_lower or "what can you do" in query_lower or "capabilities" in query_lower or "command" in query_lower:
+            intent = "CAPABILITIES_HELP"
         elif entities["customer_id"] and ("why" in query_lower or "explain" in query_lower or "reason" in query_lower or "factor" in query_lower):
             intent = "EXPLAIN_RISK_REASON"
         elif entities["customer_id"] and ("suspicious" in query_lower or "is" in query_lower or "check" in query_lower or "lookup" in query_lower or "info" in query_lower):

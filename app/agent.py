@@ -220,6 +220,24 @@ class AMLAgentOrchestrator:
                     f"<em>Tip:</em> Try querying <strong>{top_cid}</strong> (Top Risk Subject) or choose from the flagged risk table."
                 )
 
+        elif intent == "HIGH_RISK_FILTER":
+            risk_flt = entities.get("risk_filter") or "HIGH"
+            tools_called.extend(["RiskClassifierTool", "HybridAnomalyTool"])
+            tools_skipped.extend(["SingleEntityLookupTool"])
+            execution_plan = [
+                f"1. Filter dataset for subjects classified as {risk_flt} RISK",
+                "2. Sort by composite ML risk score descending",
+                "3. Present flagged subjects for compliance review"
+            ]
+            flagged = self.df_classified[self.df_classified["risk_level"] == risk_flt].sort_values(by="composite_risk_score", ascending=False)
+            merged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
+            output_payload["results"]["flagged_table"] = self._clean_records(merged)
+            
+            top_subj = merged.iloc[0] if not merged.empty else None
+            top_info = f" (Top: <strong>{top_subj['customer_id']}</strong> with score {top_subj['composite_risk_score']}/100)" if top_subj is not None else ""
+            exp_str = f"Filtered <strong>{len(flagged)} subjects</strong> classified as <strong>{risk_flt} RISK</strong>{top_info}. Check the Flagged Risk Table for details."
+            output_payload["explanations"].append(exp_str)
+
         elif intent == "STRUCTURING_SEARCH":
             tools_called.extend(["AMLFeatureEngTool", "HybridAnomalyTool", "RiskClassifierTool", "SARGeneratorTool"])
             tools_skipped.extend(["EDATool", "SingleEntityLookupTool", "ThresholdStressTestTool"])
@@ -408,7 +426,7 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["SingleEntityLookupTool"])
 
             execution_plan = [
-                "1. Parse general analytical query",
+                "1. Parse analytical query context",
                 "2. Execute batch AML feature extraction and Isolation Forest ML scoring",
                 "3. Filter high & medium risk subjects requiring analyst review",
                 "4. Present top suspicious subjects with escalation guidance"
@@ -417,7 +435,10 @@ class AMLAgentOrchestrator:
             high_risk = self.df_classified[self.df_classified["risk_level"].isin(["HIGH", "MEDIUM"])].sort_values(by="composite_risk_score", ascending=False)
             merged = pd.merge(high_risk, self.df_customers, on="customer_id", how="left")
             output_payload["results"]["flagged_table"] = self._clean_records(merged)
-            exp_str = f"Query Analyzed: Returned <strong>{len(high_risk)} suspicious subjects</strong> matching analytical criteria. View flagged risk table for details."
+            
+            top_subj = merged.iloc[0] if not merged.empty else None
+            top_info = f" Top Subject: <strong>{top_subj['customer_id']}</strong> ({top_subj.get('customer_name', top_subj['customer_id'])}) with Risk Score <strong>{top_subj['composite_risk_score']}/100</strong>." if top_subj is not None else ""
+            exp_str = f"Identified <strong>{len(high_risk)} suspicious subjects</strong> requiring compliance review.{top_info}"
             output_payload["explanations"].append(exp_str)
 
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
