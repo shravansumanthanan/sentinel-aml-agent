@@ -26,7 +26,13 @@ class NLPIntentParser:
             "superlative": None
         }
 
-        # 1. Extract Customer ID (e.g., CUST-4521, 4521, customer 1089, cust 420)
+        # 1. Conversational Greetings Detection (Priority #1)
+        greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "who are you", "what is your name", "thanks", "thank you"]
+        if query_lower in greetings or any(query_lower.startswith(g + " ") for g in ["hi", "hello", "hey"]):
+            intent = "GREETING"
+            return {"query": query, "intent": intent, "entities": entities}
+
+        # 2. Extract Customer ID (e.g., CUST-4521, 4521, customer 1089, cust 420)
         cust_match = re.search(r'(?:cust-?|customer\s*(?:id)?\s*#?)\s*([0-9]{1,5})', query_lower)
         if not cust_match:
             cust_match = re.search(r'\b([0-9]{4})\b', query_lower)
@@ -36,7 +42,7 @@ class NLPIntentParser:
             entities["raw_cust_num"] = cust_num
             entities["customer_id"] = f"CUST-{int(cust_num):04d}" if len(cust_num) < 4 else f"CUST-{cust_num}"
 
-        # 2. Extract Time Window (e.g., "last 30 days", "7d", "past week")
+        # 3. Extract Time Window (e.g., "last 30 days", "7d", "past week")
         time_match = re.search(r'(?:last|past|in\s*the)\s*([0-9]+)\s*(?:days?|d)', query_lower)
         if time_match:
             entities["time_window_days"] = int(time_match.group(1))
@@ -45,27 +51,27 @@ class NLPIntentParser:
         elif "month" in query_lower:
             entities["time_window_days"] = 30
 
-        # 3. Extract Max Amount Threshold (e.g., "under $10,000", "< 10000", "below 9500")
+        # 4. Extract Max Amount Threshold (e.g., "under $10,000", "< 10000", "below 9500")
         max_amt_match = re.search(r'(?:under|below|less\s*than|<)\s*\$?([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)', query_lower)
         if max_amt_match:
             val_str = max_amt_match.group(1).replace(',', '')
             entities["max_amount"] = float(val_str)
 
-        # 4. Extract Min Amount Threshold (e.g., "above $50,000", "> 100000", "over 50k", "more than $25,000")
+        # 5. Extract Min Amount Threshold (e.g., "above $50,000", "> 100000", "over 50k", "more than $25,000")
         min_amt_match = re.search(r'(?:above|over|greater\s*than|more\s*than|>)\s*\$?([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)\s*(k)?', query_lower)
         if min_amt_match:
             val_str = min_amt_match.group(1).replace(',', '')
             mult = 1000.0 if min_amt_match.group(2) else 1.0
             entities["min_amount"] = float(val_str) * mult
 
-        # 5. Extract Min Transaction Count (e.g., "10+ transactions", "5 or more", "more than 8")
+        # 6. Extract Min Transaction Count (e.g., "10+ transactions", "5 or more", "more than 8")
         min_count_match = re.search(r'([0-9]+)\+\s*(?:transactions|txns|tx|deposits)?', query_lower)
         if not min_count_match and not entities["min_amount"]:
             min_count_match = re.search(r'(?:more\s*than|>|at\s*least)\s*([0-9]+)\s*(?:txns|transactions)?', query_lower)
         if min_count_match:
             entities["min_count"] = int(min_count_match.group(1))
 
-        # 6. Extract Risk Filter
+        # 7. Extract Risk Filter
         if "high risk" in query_lower or "high-risk" in query_lower:
             entities["risk_filter"] = "HIGH"
         elif "medium risk" in query_lower or "medium-risk" in query_lower:
@@ -73,7 +79,7 @@ class NLPIntentParser:
         elif "low risk" in query_lower or "low-risk" in query_lower:
             entities["risk_filter"] = "LOW"
 
-        # 7. Extract Transaction Type
+        # 8. Extract Transaction Type
         if "wire" in query_lower:
             entities["transaction_type"] = "Wire"
         elif "withdrawal" in query_lower or "cash out" in query_lower or "cash-out" in query_lower:
@@ -83,17 +89,17 @@ class NLPIntentParser:
         elif "transfer" in query_lower:
             entities["transaction_type"] = "Transfer"
 
-        # 8. Extract Country / Jurisdiction
+        # 9. Extract Country / Jurisdiction
         country_match = re.search(r'\b(ky|pa|ae|us|gb|ca|de|fr|sg)\b', query_lower)
         if country_match:
             entities["country_code"] = country_match.group(1).upper()
 
-        # 9. Superlatives Detection
+        # 10. Superlatives Detection
         top_superlatives = ["highest", "top", "max", "most", "largest", "worst", "peak"]
         if any(w in query_lower for w in top_superlatives):
             entities["superlative"] = "MAX"
 
-        # 10. Robust Intent Resolution Cascade
+        # 11. Robust Intent Resolution Cascade
         if "help" in query_lower or "what can you do" in query_lower or "capabilities" in query_lower or "command" in query_lower:
             intent = "CAPABILITIES_HELP"
         elif entities["superlative"] == "MAX" and ("risk" in query_lower or "score" in query_lower or "suspicious" in query_lower or "customer" in query_lower or "who" in query_lower or "which" in query_lower):

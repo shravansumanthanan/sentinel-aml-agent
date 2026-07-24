@@ -3,7 +3,7 @@ import os
 import difflib
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.nlp_parser import NLPIntentParser
 from app.kaggle_loader import load_and_merge_kaggle_datasets
 from app.tools import (
@@ -58,20 +58,20 @@ class AMLAgentOrchestrator:
         if target_id in all_ids:
             return target_id
         
-        # 1. Check numeric padding match (e.g. 4520 -> CUST-0420)
         if raw_num:
-            num_val = int(raw_num)
-            padded = f"CUST-{num_val:04d}"
-            if padded in all_ids:
-                return padded
-            
-            # 2. Find closest numeric ID
-            nums = [int(i.replace("CUST-", "")) for i in all_ids if i.startswith("CUST-") and i.replace("CUST-", "").isdigit()]
-            if nums:
-                closest_num = min(nums, key=lambda x: abs(x - num_val))
-                return f"CUST-{closest_num:04d}"
+            try:
+                num_val = int(raw_num)
+                padded = f"CUST-{num_val:04d}"
+                if padded in all_ids:
+                    return padded
+                
+                nums = [int(i.replace("CUST-", "")) for i in all_ids if i.startswith("CUST-") and i.replace("CUST-", "").isdigit()]
+                if nums:
+                    closest_num = min(nums, key=lambda x: abs(x - num_val))
+                    return f"CUST-{closest_num:04d}"
+            except ValueError:
+                pass
 
-        # 3. String Levenshtein distance fallback
         matches = difflib.get_close_matches(target_id, all_ids, n=1, cutoff=0.3)
         return matches[0] if matches else None
 
@@ -107,7 +107,26 @@ class AMLAgentOrchestrator:
             "sar_narrative": None
         }
 
-        if intent == "CAPABILITIES_HELP":
+        if intent == "GREETING":
+            tools_called.append("GreetingResponseTool")
+            tools_skipped.extend(["DatasetWideMLTool", "SARGeneratorTool"])
+            execution_plan = [
+                "1. Parse conversational greeting intent",
+                "2. Provide welcoming analyst introduction & system capability overview"
+            ]
+            top_cid = self._get_top_suspicious_customer_id()
+            exp = (
+                "👋 <strong>Hello! I am SENTINEL-AML</strong>, your autonomous compliance & anti-money laundering decision assistant.<br><br>"
+                "I can analyze transaction feeds, detect structuring patterns, run Isolation Forest anomaly scoring, and auto-generate FinCEN SARs.<br><br>"
+                "<strong>Quick Prompts to Try:</strong><br>"
+                "• <em>'Which customer has the highest risk score?'</em><br>"
+                f"• <em>'Is {top_cid} suspicious?'</em><br>"
+                "• <em>'Find structuring patterns in the last 30 days'</em><br>"
+                "• <em>'Show transactions in FATF high risk countries'</em>"
+            )
+            output_payload["explanations"].append(exp)
+
+        elif intent == "CAPABILITIES_HELP":
             tools_called.append("CapabilitiesHelpTool")
             tools_skipped.extend(["DatasetWideMLTool", "SARGeneratorTool"])
             execution_plan = [
