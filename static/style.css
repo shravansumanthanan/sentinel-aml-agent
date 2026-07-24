@@ -26,6 +26,25 @@ body {
     overflow-x: hidden;
 }
 
+/* Custom Dark Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0B0E14;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #2D3748;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #4A5568;
+}
+
 .app-container {
     display: flex;
     flex-direction: column;
@@ -80,6 +99,7 @@ body {
     border-radius: 8px;
     display: flex;
     flex-direction: column;
+    transition: border-color 0.2s ease;
 }
 
 .metric-card.highlight {
@@ -152,13 +172,18 @@ body {
     border-radius: 20px;
     font-size: 11px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .chip:hover {
     background: #334155;
     border-color: #3B82F6;
     color: #60A5FA;
+    transform: translateY(-1px);
+}
+
+.chip:active {
+    transform: scale(0.97);
 }
 
 .chat-messages {
@@ -174,6 +199,12 @@ body {
     display: flex;
     gap: 12px;
     max-width: 95%;
+    animation: fadeIn 0.25s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .msg-avatar {
@@ -222,6 +253,7 @@ body {
     color: white;
     font-size: 13px;
     outline: none;
+    transition: border-color 0.2s ease;
 }
 
 .chat-input-container input:focus {
@@ -237,10 +269,15 @@ body {
     font-weight: 600;
     font-size: 13px;
     cursor: pointer;
+    transition: all 0.2s ease;
 }
 
 .chat-input-container button:hover {
     background: #1D4ED8;
+}
+
+.chat-input-container button:active {
+    transform: scale(0.97);
 }
 
 /* Right Workbench Panel */
@@ -268,6 +305,10 @@ body {
     cursor: pointer;
     border-bottom: 2px solid transparent;
     transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
 }
 
 .tab-btn.active {
@@ -462,6 +503,15 @@ body {
     border-radius: 4px;
     font-size: 11px;
     cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+    background: #1D4ED8;
+}
+
+.action-btn:active {
+    transform: scale(0.96);
 }
 
 /* SAR Generator Pane */
@@ -492,6 +542,15 @@ body {
     border-radius: 6px;
     font-size: 12px;
     cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.secondary-btn:hover {
+    background: #475569;
+}
+
+.secondary-btn:active {
+    transform: scale(0.96);
 }
 
 .primary-action-btn {
@@ -503,10 +562,15 @@ body {
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
+    transition: all 0.2s ease;
 }
 
 .primary-action-btn:hover {
     background: #059669;
+}
+
+.primary-action-btn:active {
+    transform: scale(0.96);
 }
 
 #sar-textarea {
