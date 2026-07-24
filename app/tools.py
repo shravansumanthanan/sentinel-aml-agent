@@ -38,7 +38,7 @@ class EDATool:
 
 
 class AMLFeatureEngTool:
-    """Engineers AML features: rolling velocity, structuring frequency ratio, amount z-scores."""
+    """Engineers AML features: rolling velocity, structuring ratio, high-risk country volume, fan-in counts."""
     def run(self, df_tx: pd.DataFrame, time_window_days: int = 30) -> pd.DataFrame:
         df = df_tx.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"])
@@ -60,12 +60,9 @@ class AMLFeatureEngTool:
         # 3. Merge features back
         features = pd.merge(cust_stats, struct_counts, on="customer_id", how="left")
         features["structuring_count"] = features["structuring_count"].fillna(0).astype(int)
-        
-        # Ratio of structuring txns
         features["structuring_ratio"] = features["structuring_count"] / features["total_tx_count"]
 
         # 4. Rapid Cash-out Velocity feature
-        # (Transfers/Wires followed by Cash Withdrawals within 2 hours)
         df_sorted = df.sort_values(by=["customer_id", "timestamp"])
         df_sorted["prev_type"] = df_sorted.groupby("customer_id")["transaction_type"].shift(1)
         df_sorted["prev_time"] = df_sorted.groupby("customer_id")["timestamp"].shift(1)
@@ -81,24 +78,43 @@ class AMLFeatureEngTool:
         features = pd.merge(features, rapid_counts, on="customer_id", how="left")
         features["rapid_cashout_count"] = features["rapid_cashout_count"].fillna(0).astype(int)
 
+        # 5. High-Risk Jurisdiction Feature (FATF Grey/Blacklist: KY, PA, AE)
+        high_risk_jurisdictions = ["KY", "PA", "AE"]
+        hr_txs = df[df["country_code"].isin(high_risk_jurisdictions)]
+        hr_counts = hr_txs.groupby("customer_id").size().reset_index(name="high_risk_country_tx_count")
+        hr_vol = hr_txs.groupby("customer_id")["amount"].sum().reset_index(name="high_risk_country_volume")
+
+        features = pd.merge(features, hr_counts, on="customer_id", how="left")
+        features = pd.merge(features, hr_vol, on="customer_id", how="left")
+        features["high_risk_country_tx_count"] = features["high_risk_country_tx_count"].fillna(0).astype(int)
+        features["high_risk_country_volume"] = features["high_risk_country_volume"].fillna(0.0)
+
+        # 6. Smurfing Multi-Account Fan-In Count
+        unique_dests = df.groupby("customer_id")["destination_account"].nunique().reset_index(name="distinct_destination_accounts")
+        features = pd.merge(features, unique_dests, on="customer_id", how="left")
+        features["distinct_destination_accounts"] = features["distinct_destination_accounts"].fillna(1).astype(int)
+
         return features
 
 
 class HybridAnomalyTool:
     """
     Hybrid Anomaly Detector combining Isolation Forest (Unsupervised ML)
-    with Banking Rule Engines (Structuring & Rapid Velocity rules).
+    with Domain Rule Engines (Structuring, Rapid Velocity, High-Risk Country, & Fan-In rules).
     """
     def run(self, df_features: pd.DataFrame, structuring_threshold: float = 9000.0) -> pd.DataFrame:
         df = df_features.copy()
         
         # 1. Machine Learning Outlier Detection (Isolation Forest)
-        feature_cols = ["total_tx_count", "total_tx_volume", "avg_amount", "structuring_count", "rapid_cashout_count"]
+        feature_cols = [
+            "total_tx_count", "total_tx_volume", "avg_amount", 
+            "structuring_count", "rapid_cashout_count", 
+            "high_risk_country_tx_count", "distinct_destination_accounts"
+        ]
         X = df[feature_cols].fillna(0)
         
         iso_model = IsolationForest(n_estimators=100, contamination=0.05, random_state=42)
-        df["iso_forest_anomaly_score"] = -iso_model.fit_predict(X)  # 1 = Anomaly, -1 = Normal
-        # Convert to 0 - 1 normalized score
+        df["iso_forest_anomaly_score"] = -iso_model.fit_predict(X)
         scores = iso_model.decision_function(X)
         df["ml_score"] = np.round((scores.max() - scores) / (scores.max() - scores.min() + 1e-6) * 100, 1)
 
@@ -106,17 +122,35 @@ class HybridAnomalyTool:
         # Rule 1: Structuring (5+ transactions in Structuring band)
         df["rule_structuring"] = df["structuring_count"] >= 5
         
-        # Rule 2: Velocity Spike (Rapid cashouts >= 2 or high volume spike)
+        # Rule 2: Velocity Spike (Rapid cashouts >= 2)
         df["rule_velocity"] = df["rapid_cashout_count"] >= 2
 
         # Rule 3: High Volume Cash Trap
         df["rule_high_volume"] = (df["total_tx_volume"] > 100000.0) & (df["structuring_count"] >= 3)
 
+        # Rule 4: High-Risk Jurisdiction Wire Rule (Transfers > $20k with KY/PA/AE)
+        df["rule_high_risk_country"] = (df["high_risk_country_volume"] >= 20000.0)
+
+        # Rule 5: Smurfing Fan-In Rule (4+ distinct accounts used in rapid pattern)
+        df["rule_smurfing_fan_in"] = (df["distinct_destination_accounts"] >= 4) & (df["total_tx_count"] >= 5)
+
         # Combine Rule Hits
-        df["rule_hits_count"] = df["rule_structuring"].astype(int) + df["rule_velocity"].astype(int) + df["rule_high_volume"].astype(int)
+        df["rule_hits_count"] = (
+            df["rule_structuring"].astype(int) + 
+            df["rule_velocity"].astype(int) + 
+            df["rule_high_volume"].astype(int) + 
+            df["rule_high_risk_country"].astype(int) + 
+            df["rule_smurfing_fan_in"].astype(int)
+        )
 
         # Composite Risk Score Calculation (Hybrid)
-        df["composite_risk_score"] = np.clip(df["ml_score"] * 0.4 + df["rule_hits_count"] * 30.0 + df["structuring_count"] * 5.0, 0, 100).round(1)
+        df["composite_risk_score"] = np.clip(
+            df["ml_score"] * 0.35 + 
+            df["rule_hits_count"] * 25.0 + 
+            df["structuring_count"] * 4.0 + 
+            df["high_risk_country_tx_count"] * 10.0, 
+            0, 100
+        ).round(1)
 
         return df
 
@@ -130,7 +164,7 @@ class RiskClassifierTool:
             score = row["composite_risk_score"]
             if score >= 75.0 or row["rule_hits_count"] >= 2:
                 return "HIGH", "REPORT (File FinCEN SAR)"
-            elif score >= 45.0 or row["structuring_count"] >= 3:
+            elif score >= 45.0 or row["structuring_count"] >= 3 or row["rule_high_risk_country"]:
                 return "MEDIUM", "FLAG FOR REVIEW (Senior Analyst)"
             else:
                 return "LOW", "MONITOR (Routine Check)"
@@ -165,11 +199,10 @@ class SingleEntityLookupTool:
 class ThresholdStressTestTool:
     """
     (Lens 3 Feature) Scenario Stress Tester: Recalculates false positives and threat deltas
-    when an analyst adjusts the structuring threshold amount (e.g. from $10,000 down to $8,500).
+    when an analyst adjusts the structuring threshold amount.
     """
     def run(self, df_tx: pd.DataFrame, df_features: pd.DataFrame, lower_bound: float = 8500.0, upper_bound: float = 9999.0) -> Dict[str, Any]:
         df = df_tx.copy()
-        # Find transactions falling within new custom band
         band_txs = df[(df["amount"] >= lower_bound) & (df["amount"] <= upper_bound)]
         cust_band_counts = band_txs.groupby("customer_id").size().reset_index(name="new_struct_count")
         
@@ -205,6 +238,7 @@ class SARGeneratorTool:
         struct_count = risk_profile.get("structuring_count", 0)
         total_vol = risk_profile.get("total_tx_volume", 0)
         rapid_cashout = risk_profile.get("rapid_cashout_count", 0)
+        hr_vol = risk_profile.get("high_risk_country_volume", 0)
 
         narrative = f"""
 ================================================================================
@@ -223,6 +257,9 @@ DETAILED PATTERN ANALYSIS:
 
 2. RAPID VELOCITY & CASHOUT SPIKES:
    The subject's account exhibited {rapid_cashout} rapid cash-out events (incoming wire/deposit followed by immediate cash withdrawal within 120 minutes), presenting high risk of money laundering layering.
+
+3. HIGH-RISK JURISDICTION EXPOSURE:
+   Transferred ${hr_vol:,.2f} involving FATF high-risk jurisdictions (Cayman Islands, Panama, UAE), triggering mandatory compliance review.
 
 RECOMMENDED REGULATORY ACTION:
 - Status: MANDATORY REPORTING (SAR FILING REQUIRED)
