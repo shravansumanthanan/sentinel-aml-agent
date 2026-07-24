@@ -93,6 +93,7 @@ class AMLAgentOrchestrator:
             top_cid = self._get_top_suspicious_customer_id()
             exp = (
                 "<strong>SENTINEL-AML Capabilities & Command Taxonomy:</strong><br>"
+                "• <strong>Highest Risk Query:</strong> <em>'Which customer has the highest risk score?'</em><br>"
                 "• <strong>Structuring & Smurfing Search:</strong> <em>'Find structuring patterns in last 30 days'</em> or <em>'10+ txns under $10,000'</em><br>"
                 f"• <strong>Entity Risk Lookup:</strong> <em>'Is {top_cid} suspicious?'</em> or <em>'Explain risk for customer {top_cid.replace('CUST-', '')}'</em><br>"
                 "• <strong>Large Volume Filters:</strong> <em>'Transactions above $50,000'</em> or <em>'Volume over $100k'</em><br>"
@@ -102,6 +103,37 @@ class AMLAgentOrchestrator:
                 "• <strong>Dataset EDA Overview:</strong> <em>'Perform full EDA on transaction dataset'</em>"
             )
             output_payload["explanations"].append(exp)
+
+        elif intent == "TOP_RISK_SUBJECT":
+            tools_called.extend(["RiskClassifierTool", "SingleEntityLookupTool", "SARGeneratorTool"])
+            tools_skipped.extend(["EDATool", "ThresholdStressTestTool"])
+            execution_plan = [
+                "1. Sort customer dataset by composite ML risk score descending",
+                "2. Extract rank #1 subject with highest risk score",
+                "3. Display subject profile, risk breakdown, and recommended compliance escalation",
+                "4. Auto-generate FinCEN SAR narrative for top subject"
+            ]
+
+            sorted_df = pd.merge(self.df_classified, self.df_customers, on="customer_id", how="left").sort_values(by="composite_risk_score", ascending=False)
+            output_payload["results"]["flagged_table"] = self._clean_records(sorted_df.head(10))
+
+            top_row = sorted_df.iloc[0]
+            top_cid = top_row["customer_id"]
+            cust_name = top_row.get("customer_name") or top_cid
+
+            exp = (
+                f"🏆 <strong>Top Risk Subject in Dataset:</strong> Customer <strong>{top_cid}</strong> ({cust_name}) "
+                f"holds the highest composite risk score of <strong>{top_row['composite_risk_score']}/100 ({top_row['risk_level']} RISK)</strong>.<br>"
+                f"• <strong>Recommended Action:</strong> <strong>{top_row['recommended_action']}</strong><br>"
+                f"• <strong>Structuring Count:</strong> {top_row.get('structuring_count', 0)} cash deposits under statutory limit<br>"
+                f"• <strong>Total Volume:</strong> ${top_row.get('total_tx_volume', 0):,.2f}"
+            )
+            output_payload["explanations"].append(exp)
+
+            lookup_data = self.single_lookup_tool.run(top_cid, self.df_transactions, self.df_customers, self.df_classified)
+            if lookup_data.get("found") and top_row["risk_level"] == "HIGH":
+                sar_text = self.sar_tool.generate_sar(top_cid, lookup_data["customer"], lookup_data["risk_profile"], lookup_data["transaction_history"])
+                output_payload["sar_narrative"] = sar_text
 
         elif intent == "EXPLAIN_RISK_REASON":
             cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
@@ -141,6 +173,12 @@ class AMLAgentOrchestrator:
                 if r.get("risk_level") == "HIGH":
                     sar_text = self.sar_tool.generate_sar(cid, c, r, lookup_data["transaction_history"])
                     output_payload["sar_narrative"] = sar_text
+            else:
+                top_cid = self._get_top_suspicious_customer_id()
+                output_payload["explanations"].append(
+                    f"Customer ID <strong>{cid}</strong> was not found in the active customer database. "
+                    f"Try querying a valid subject such as top risk subject <strong>{top_cid}</strong>."
+                )
 
         elif intent == "SINGLE_ENTITY_LOOKUP":
             cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
@@ -176,7 +214,11 @@ class AMLAgentOrchestrator:
                     sar_text = self.sar_tool.generate_sar(cid, cust_info, risk_prof, tx_hist)
                     output_payload["sar_narrative"] = sar_text
             else:
-                output_payload["explanations"].append(f"Customer ID <strong>{cid}</strong> was not found in the active customer database.")
+                top_cid = self._get_top_suspicious_customer_id()
+                output_payload["explanations"].append(
+                    f"Customer ID <strong>{cid}</strong> was not found in the active customer database.<br>"
+                    f"<em>Tip:</em> Try querying <strong>{top_cid}</strong> (Top Risk Subject) or choose from the flagged risk table."
+                )
 
         elif intent == "STRUCTURING_SEARCH":
             tools_called.extend(["AMLFeatureEngTool", "HybridAnomalyTool", "RiskClassifierTool", "SARGeneratorTool"])
