@@ -1,0 +1,14 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.git/
+.gitignore
+.github/
+.pytest_cache/
+.DS_Store
+*.log
+data/ci_test_cache/
+data/model_cache/*.pkl
