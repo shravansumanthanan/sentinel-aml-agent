@@ -27,41 +27,20 @@ def load_and_merge_kaggle_datasets(
                       (1 = laundering confirmed, 0 = clean) — None if unavailable.
     """
     os.makedirs(data_dir, exist_ok=True)
-    
-    tx_path = os.path.join(data_dir, "transactions.csv")
-    cust_path = os.path.join(data_dir, "customers.csv")
-    
-    # Priority 1: Pre-existing normalized CSVs
-    if os.path.exists(tx_path) and os.path.exists(cust_path):
-        print("✅ Loading pre-existing transactions.csv and customers.csv from data/")
-        df_tx = pd.read_csv(tx_path)
-        df_cust = pd.read_csv(cust_path)
-
-        # Ensure required columns exist
-        defaults = {
-            "channel": lambda n: np.random.choice(["Online", "Branch", "ATM", "Mobile"], n),
-            "destination_account": lambda n: "ACC-EXTERNAL",
-            "country_code": lambda n: np.random.choice(["US", "CA", "GB", "KY", "PA", "AE", "DE"], n, p=[0.5, 0.1, 0.1, 0.1, 0.05, 0.1, 0.05])
-        }
-        n_rows = len(df_tx)
-        for col in ["transaction_id", "customer_id", "timestamp", "amount", "transaction_type", "channel", "destination_account", "country_code"]:
-            if col not in df_tx.columns:
-                df_tx[col] = defaults[col](n_rows) if col in defaults else ""
-
-        # Recover per-customer labels if an is_laundering column exists
-        customer_labels = _extract_customer_labels(df_tx)
-        return df_tx, df_cust, customer_labels
-
-    # Priority 2: Auto-detect Kaggle-format CSVs in data/
-    csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+    # Priority 1: Auto-detect newly added Kaggle/PaySim/Custom CSVs in data/ (excluding default transactions.csv/customers.csv)
+    csv_files = [
+        f for f in glob.glob(os.path.join(data_dir, "*.csv"))
+        if os.path.basename(f).lower() not in ["transactions.csv", "customers.csv", "customers_processed.csv"]
+    ]
     df_tx_list = []
-    
+
     for fpath in csv_files:
-        fname = os.path.basename(fpath).lower()
-        if fname in ["customers.csv", "customers_processed.csv"]:
-            continue
+        fname = os.path.basename(fpath)
         try:
-            sample_df = pd.read_csv(fpath, nrows=5)
+            sample_df = pd.read_csv(fpath, nrows=10).dropna(how="all")
+            if sample_df.empty:
+                print(f"⚠️ [Ingestion] Skipping empty file: {fname}")
+                continue
             cols = [c.lower().strip() for c in sample_df.columns]
 
             if "nameorig" in cols or "namedest" in cols:
@@ -151,9 +130,27 @@ def load_and_merge_kaggle_datasets(
     if df_tx_list:
         df_transactions = pd.concat(df_tx_list, ignore_index=True)
     else:
-        # Priority 3: Generate synthetic demo data
-        print("⚠️ No dataset found. Generating synthetic AML demo data...")
-        df_transactions = _generate_synthetic_data()
+        tx_path = os.path.join(data_dir, "transactions.csv")
+        cust_path = os.path.join(data_dir, "customers.csv")
+        if os.path.exists(tx_path) and os.path.exists(cust_path):
+            print("✅ Loading pre-existing transactions.csv and customers.csv from data/")
+            df_tx = pd.read_csv(tx_path)
+            df_cust = pd.read_csv(cust_path)
+            defaults = {
+                "channel": lambda n: np.random.choice(["Online", "Branch", "ATM", "Mobile"], n),
+                "destination_account": lambda n: "ACC-EXTERNAL",
+                "country_code": lambda n: np.random.choice(["US", "CA", "GB", "KY", "PA", "AE", "DE"], n, p=[0.5, 0.1, 0.1, 0.1, 0.05, 0.1, 0.05])
+            }
+            n_rows = len(df_tx)
+            for col in ["transaction_id", "customer_id", "timestamp", "amount", "transaction_type", "channel", "destination_account", "country_code"]:
+                if col not in df_tx.columns:
+                    df_tx[col] = defaults[col](n_rows) if col in defaults else ""
+            customer_labels = _extract_customer_labels(df_tx)
+            return df_tx, df_cust, customer_labels
+        else:
+            # Priority 3: Generate synthetic demo data
+            print("⚠️ No dataset found. Generating synthetic AML demo data...")
+            df_transactions = _generate_synthetic_data()
 
     # Aggregate per-customer labels from transaction-level labels (if present)
     customer_labels = _extract_customer_labels(df_transactions)
