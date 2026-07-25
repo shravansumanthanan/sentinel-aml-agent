@@ -56,6 +56,9 @@ class TestSentinelAMLNLPParsing(unittest.TestCase):
             ("Filter by GRAY LIST countries", "JURISDICTION_ANALYSIS", {}),
             ("Analyze transactions over 50k", "LARGE_AMOUNT_FILTER", {"min_amount": 50000.0}),
             ("Is cust 420 suspicious?", "SINGLE_ENTITY_LOOKUP", {"customer_id": "CUST-0420"}),
+            ("Which customers made more than 10 transactions under £10,000?", "THRESHOLD_AGGREGATION", {"min_count": 10, "max_amount": 10000.0, "min_amount": None}),
+            ("Which customers made more than 5 transactions under €5,000?", "THRESHOLD_AGGREGATION", {"min_count": 5, "max_amount": 5000.0, "min_amount": None}),
+            ("Which customers made more than 12 transactions under ₹50,000?", "THRESHOLD_AGGREGATION", {"min_count": 12, "max_amount": 50000.0, "min_amount": None}),
         ]
         for query, expected_intent, expected_entities in cases:
             with self.subTest(query=query):

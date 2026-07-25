@@ -451,6 +451,7 @@ class AMLAgentOrchestrator:
 
         elif intent == "THRESHOLD_AGGREGATION":
             min_count = entities.get("min_count") or 5
+            has_max_amt = entities.get("max_amount") is not None
             max_amt = entities.get("max_amount") or (self.df_transactions["amount"].max() * 0.99)
             
             tools_called.extend(["AMLFeatureEngTool", "ThresholdAggregationTool"])
@@ -463,10 +464,17 @@ class AMLAgentOrchestrator:
                 "4. Return instant compliance table"
             ]
 
-            filtered_cust = self.df_classified[
-                (self.df_classified["structuring_count"] >= min_count) | 
-                ((self.df_classified["total_tx_count"] >= min_count) & (self.df_classified["avg_amount"] < max_amt))
-            ]
+            if has_max_amt:
+                tx_below = self.df_transactions[self.df_transactions["amount"] < max_amt]
+                tx_counts = tx_below.groupby("customer_id").size()
+                matching_cust_ids = tx_counts[tx_counts >= min_count].index
+                filtered_cust = self.df_classified[self.df_classified["customer_id"].isin(matching_cust_ids)].sort_values(by="total_tx_volume", ascending=False)
+            else:
+                filtered_cust = self.df_classified[
+                    (self.df_classified["structuring_count"] >= min_count) | 
+                    ((self.df_classified["total_tx_count"] >= min_count) & (self.df_classified["avg_amount"] < max_amt))
+                ].sort_values(by="total_tx_volume", ascending=False)
+
             merged = pd.merge(filtered_cust, self.df_customers, on="customer_id", how="left")
             output_payload["results"]["flagged_table"] = self._clean_records(merged)
             
