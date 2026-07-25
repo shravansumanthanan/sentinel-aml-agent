@@ -13,6 +13,7 @@ class EDATool:
         total_volume = float(df_tx["amount"].sum())
         avg_tx = float(df_tx["amount"].mean())
         max_tx = float(df_tx["amount"].max())
+        min_tx = float(df_tx["amount"].min())
         unique_customers = int(df_tx["customer_id"].nunique())
         
         tx_type_dist = df_tx["transaction_type"].value_counts().to_dict()
@@ -28,6 +29,7 @@ class EDATool:
                 "total_volume": round(total_volume, 2),
                 "average_amount": round(avg_tx, 2),
                 "max_amount": round(max_tx, 2),
+                "min_amount": round(min_tx, 2),
                 "unique_customers": unique_customers
             },
             "distributions": {

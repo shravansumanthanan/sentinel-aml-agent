@@ -62,6 +62,10 @@ class TestSentinelAMLNLPParsing(unittest.TestCase):
             ("Average transaction amount?", "FULL_EDA", {}),
             ("what is the mean transaction size?", "FULL_EDA", {}),
             ("overall avg amount", "FULL_EDA", {}),
+            ("Biggest transaction?", "FULL_EDA", {}),
+            ("Largest transaction?", "FULL_EDA", {}),
+            ("Smallest transaction?", "FULL_EDA", {}),
+            ("Maximum transaction size", "FULL_EDA", {}),
         ]
         for query, expected_intent, expected_entities in cases:
             with self.subTest(query=query):

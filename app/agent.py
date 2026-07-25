@@ -497,8 +497,10 @@ class AMLAgentOrchestrator:
             exp_str = (
                 f"Dataset contains <strong>{eda_res['summary']['total_transactions']:,} transactions</strong> across "
                 f"<strong>{eda_res['summary']['unique_customers']:,} unique customers</strong> with "
-                f"<strong>${eda_res['summary']['total_volume']:,.2f}</strong> total volume "
-                f"(Average transaction amount: <strong>${eda_res['summary']['average_amount']:,.2f}</strong>)."
+                f"<strong>${eda_res['summary']['total_volume']:,.2f}</strong> total volume.<br>"
+                f"• <strong>Average Amount:</strong> ${eda_res['summary']['average_amount']:,.2f}<br>"
+                f"• <strong>Biggest / Max Amount:</strong> ${eda_res['summary']['max_amount']:,.2f}<br>"
+                f"• <strong>Smallest / Min Amount:</strong> ${eda_res['summary']['min_amount']:,.2f}"
             )
             output_payload["explanations"].append(exp_str)
 
