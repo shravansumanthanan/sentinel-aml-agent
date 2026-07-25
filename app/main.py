@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
+from typing import Dict, Any, List, Optional
 import os
 
 from app.agent import AMLAgentOrchestrator
@@ -32,12 +33,33 @@ except Exception as e:
     print(f"[SENTINEL-AML] WARNING: Orchestrator failed to initialise: {e}")
 
 class ChatRequest(BaseModel):
-    query: str
+    query: str = Field(..., description="Natural language compliance analyst query")
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_message_alias(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            if "query" not in values and "message" in values:
+                values["query"] = values["message"]
+        return values
 
 class StressTestRequest(BaseModel):
-    lower_bound: float
+    lower_bound: float = Field(..., description="Minimum transaction amount threshold lower bound")
 
-@app.post("/api/chat")
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+
+class ChatResponse(BaseModel):
+    query: str
+    parsed_intent: str
+    extracted_entities: Dict[str, Any]
+    telemetry: Dict[str, Any]
+    results: Dict[str, Any]
+    explanations: List[str]
+    sar_narrative: Optional[str] = None
+
+@app.post("/api/chat", response_model=ChatResponse)
 def chat_endpoint(req: ChatRequest):
     if orchestrator is None:
         raise HTTPException(status_code=503, detail="Agent engine is not available. Check server logs.")
@@ -56,9 +78,12 @@ def stress_test_endpoint(req: StressTestRequest):
     result = orchestrator.stress_test_threshold(req.lower_bound)
     return result
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthResponse)
 def health_endpoint():
-    return {"status": "ok" if orchestrator is not None else "degraded", "version": app.version}
+    return HealthResponse(
+        status="ok" if orchestrator is not None else "degraded",
+        version=app.version
+    )
 
 @app.get("/api/dataset/summary")
 def summary_endpoint():
