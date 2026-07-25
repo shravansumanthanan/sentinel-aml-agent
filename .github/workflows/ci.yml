@@ -1,0 +1,73 @@
+name: Sentinel AML CI/CD Quality Gate Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  test-and-lint:
+    name: Code Quality & Automated Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pytest pytest-cov
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Syntax and Lint Verification
+        run: |
+          # Stop build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=venv
+          # Exit-zero treats all errors as warnings
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --exclude=venv
+
+      - name: Generate Synthetic Dataset Benchmark
+        run: |
+          python data_generator.py
+
+      - name: Execute Automated Test Suite
+        run: |
+          python -m unittest discover -s tests -p "test_*.py" -v
+
+  docker-build:
+    name: Container Build & Healthcheck Verification
+    needs: test-and-lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Sentinel AML Container Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: sentinel-aml-agent:latest
+          load: true
+
+      - name: Run Healthcheck Container Test
+        run: |
+          docker run -d --name sentinel-aml-test -p 8000:8000 sentinel-aml-agent:latest
+          sleep 5
+          curl --fail http://localhost:8000/api/health || (docker logs sentinel-aml-test && exit 1)
+          docker stop sentinel-aml-test

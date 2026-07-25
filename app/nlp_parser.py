@@ -35,7 +35,8 @@ class NLPIntentParser:
         # 2. Extract Customer ID (e.g., CUST-4521, 4521, customer 1089, cust 420)
         cust_match = re.search(r'(?:cust-?|customer\s*(?:id)?\s*#?)\s*([0-9]{1,5})', query_lower)
         if not cust_match:
-            cust_match = re.search(r'\b([0-9]{4})\b', query_lower)
+            # Only match a bare 4-digit number if NOT preceded by a currency sign or comma
+            cust_match = re.search(r'(?<![\$,])\b([0-9]{4})\b(?![,0-9])', query_lower)
         
         if cust_match:
             cust_num = cust_match.group(1)
@@ -113,14 +114,15 @@ class NLPIntentParser:
             entities["pattern_type"] = "STRUCTURING"
         elif "how many" in query_lower and ("risk" in query_lower or "customer" in query_lower or "subject" in query_lower):
             intent = "COUNT_RISK_SUMMARY"
+        # Wire/channel checks must come BEFORE min_amount to avoid shadowing
+        elif entities.get("transaction_type") or "wire" in query_lower or "channel" in query_lower or ("type" in query_lower and "transaction" in query_lower):
+            intent = "TRANSACTION_TYPE_BREAKDOWN"
         elif entities["min_amount"] is not None:
             intent = "LARGE_AMOUNT_FILTER"
         elif entities["min_count"] is not None or (entities["max_amount"] is not None and "which customers" in query_lower):
             intent = "THRESHOLD_AGGREGATION"
         elif "country" in query_lower or "jurisdiction" in query_lower or "fatf" in query_lower or "grey list" in query_lower or "gray list" in query_lower or entities["country_code"]:
             intent = "JURISDICTION_ANALYSIS"
-        elif "wire" in query_lower or "channel" in query_lower or ("type" in query_lower and "transaction" in query_lower):
-            intent = "TRANSACTION_TYPE_BREAKDOWN"
         elif "eda" in query_lower or "profile" in query_lower or "summary" in query_lower or "distribution" in query_lower or "baseline" in query_lower or "total volume" in query_lower or "stats" in query_lower:
             intent = "FULL_EDA"
         elif entities["risk_filter"] or "flag" in query_lower or "anomal" in query_lower or "suspicious" in query_lower:
