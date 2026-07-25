@@ -117,5 +117,49 @@ class TestFastAPIEndpoints(unittest.TestCase):
         self.assertIn("interpretation", res)
 
 
+class TestAIRegressionGuard(unittest.TestCase):
+    """
+    AI Regression Guard Suite.
+    Catches AI-specific blind spots: payload contract drift, missing telemetry keys,
+    and cross-platform data generator path bugs.
+    """
+
+    def test_ai_regression_response_payload_contract(self):
+        """BUG-REGRESSION: Ensures AI edits never silently drop mandatory top-level API keys."""
+        req = ChatRequest(query="Find structuring patterns in the last 30 days")
+        res = chat_endpoint(req)
+
+        required_keys = ["query", "parsed_intent", "extracted_entities", "telemetry", "results", "explanations", "sar_narrative"]
+        for key in required_keys:
+            self.assertIn(key, res, f"AI Regression Guard: Payload missing mandatory key '{key}'")
+
+    def test_ai_regression_telemetry_keys(self):
+        """BUG-REGRESSION: Telemetry must contain explicit execution plan, tools called/skipped, and numeric latency."""
+        req = ChatRequest(query="Is CUST-0001 suspicious?")
+        res = chat_endpoint(req)
+        telemetry = res["telemetry"]
+
+        self.assertIn("execution_plan", telemetry)
+        self.assertIn("tools_called", telemetry)
+        self.assertIn("tools_skipped", telemetry)
+        self.assertIn("latency_ms", telemetry)
+        self.assertIsInstance(telemetry["latency_ms"], (int, float))
+
+    def test_ai_regression_synthetic_data_generator_parity(self):
+        """BUG-REGRESSION: data_generator must run cleanly without throwing path or permission errors."""
+        from data_generator import generate_aml_dataset
+        import tempfile
+        import shutil
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            generate_aml_dataset(data_dir=temp_dir, num_customers=50, num_transactions=200)
+            self.assertTrue(os.path.exists(os.path.join(temp_dir, "customers.csv")))
+            self.assertTrue(os.path.exists(os.path.join(temp_dir, "transactions.csv")))
+        finally:
+            shutil.rmtree(temp_dir)
+
+
 if __name__ == "__main__":
     unittest.main()
+
