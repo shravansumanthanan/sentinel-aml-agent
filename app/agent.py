@@ -104,14 +104,12 @@ class AMLAgentOrchestrator:
 
     def _clean_records(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Utility to convert DataFrame to dict records replacing NaN/Inf with JSON-compliant defaults."""
-        df_copy = df.copy()
-        df_copy = df_copy.replace([np.inf, -np.inf], np.nan)
-        for col in df_copy.columns:
-            if df_copy[col].dtype == 'object':
-                df_copy[col] = df_copy[col].fillna("")
-            else:
-                df_copy[col] = df_copy[col].fillna(0)
-        return df_copy.to_dict(orient="records")
+        df_clean = df.replace([np.inf, -np.inf], np.nan)
+        obj_cols = df_clean.select_dtypes(include=["object", "string"]).columns
+        num_cols = df_clean.select_dtypes(exclude=["object", "string"]).columns
+        df_clean[obj_cols] = df_clean[obj_cols].fillna("")
+        df_clean[num_cols] = df_clean[num_cols].fillna(0)
+        return df_clean.to_dict(orient="records")
 
     def process_query(self, query: str) -> Dict[str, Any]:
         start_time = time.time()

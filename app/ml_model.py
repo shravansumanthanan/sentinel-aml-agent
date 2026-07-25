@@ -76,16 +76,15 @@ class SupervisedAMLClassifier:
 
     def _has_valid_cache(self, n_samples: int) -> bool:
         """Return True if a cached supervised model exists for ~same dataset size."""
-        if not (os.path.exists(self._model_path) and os.path.exists(self._meta_path)):
-            return False
-        try:
-            with open(self._meta_path) as f:
-                meta = json.load(f)
-            cached_n = meta.get("n_samples", 0)
-            size_drift = abs(cached_n - n_samples) / max(cached_n, 1)
-            return meta.get("is_supervised", False) and size_drift <= 0.10
-        except Exception:
-            return False
+        if os.path.exists(self._model_path) and os.path.exists(self._meta_path):
+            try:
+                with open(self._meta_path) as f:
+                    meta = json.load(f)
+                cached_n = meta.get("n_samples", 0)
+                return meta.get("is_supervised", False) and abs(cached_n - n_samples) / max(cached_n, 1) <= 0.10
+            except Exception:
+                pass
+        return False
 
     def _load_cached(self) -> bool:
         """Load model artefacts from disk. Returns True on success."""

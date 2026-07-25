@@ -38,18 +38,15 @@ def load_and_merge_kaggle_datasets(
         df_cust = pd.read_csv(cust_path)
 
         # Ensure required columns exist
-        required_tx_cols = ["transaction_id", "customer_id", "timestamp", "amount",
-                            "transaction_type", "channel", "destination_account", "country_code"]
-        for col in required_tx_cols:
+        defaults = {
+            "channel": lambda n: np.random.choice(["Online", "Branch", "ATM", "Mobile"], n),
+            "destination_account": lambda n: "ACC-EXTERNAL",
+            "country_code": lambda n: np.random.choice(["US", "CA", "GB", "KY", "PA", "AE", "DE"], n, p=[0.5, 0.1, 0.1, 0.1, 0.05, 0.1, 0.05])
+        }
+        n_rows = len(df_tx)
+        for col in ["transaction_id", "customer_id", "timestamp", "amount", "transaction_type", "channel", "destination_account", "country_code"]:
             if col not in df_tx.columns:
-                if col == "channel":
-                    df_tx[col] = np.random.choice(["Online", "Branch", "ATM", "Mobile"], len(df_tx))
-                elif col == "destination_account":
-                    df_tx[col] = "ACC-EXTERNAL"
-                elif col == "country_code":
-                    df_tx[col] = np.random.choice(["US", "CA", "GB", "KY", "PA", "AE", "DE"], len(df_tx), p=[0.5, 0.1, 0.1, 0.1, 0.05, 0.1, 0.05])
-                else:
-                    df_tx[col] = ""
+                df_tx[col] = defaults[col](n_rows) if col in defaults else ""
 
         # Recover per-customer labels if an is_laundering column exists
         customer_labels = _extract_customer_labels(df_tx)
