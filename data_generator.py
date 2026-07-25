@@ -4,11 +4,15 @@ from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 
-def generate_aml_dataset(data_dir="/Users/sterlingsuman/Desktop/projectx/data", num_customers=5000, num_transactions=50000):
+def generate_aml_dataset(data_dir=None, num_customers=5000, num_transactions=50000):
     """
     Generates large-scale Kaggle-standard synthetic AML dataset containing 5,000 customers 
     and 50,000 transactions with embedded money laundering patterns (Structuring, Rapid Velocity, Smurfing).
     """
+    if data_dir is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(script_dir, "data")
+
     os.makedirs(data_dir, exist_ok=True)
     random.seed(42)
     np.random.seed(42)
