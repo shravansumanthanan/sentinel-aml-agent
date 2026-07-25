@@ -66,6 +66,8 @@ class TestSentinelAMLNLPParsing(unittest.TestCase):
             ("Largest transaction?", "FULL_EDA", {}),
             ("Smallest transaction?", "FULL_EDA", {}),
             ("Maximum transaction size", "FULL_EDA", {}),
+            ("Which countries?", "JURISDICTION_ANALYSIS", {}),
+            ("Which jurisdictions?", "JURISDICTION_ANALYSIS", {}),
         ]
         for query, expected_intent, expected_entities in cases:
             with self.subTest(query=query):
