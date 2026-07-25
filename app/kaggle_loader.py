@@ -1,151 +1,244 @@
 import os
 import glob
-import io
-import urllib.request
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Tuple
+from typing import Tuple, Optional
 
-# Standard public remote URLs for lightweight in-memory streaming fallback of Kaggle AML datasets
-REMOTE_IBM_SAMPLE_URL = "https://raw.githubusercontent.com/IBM/App-AppID-Nodejs-Quickstart/main/sample.csv" 
-REMOTE_PAYSIM_SAMPLE_URL = "https://raw.githubusercontent.com/cloudera/finance-demo/master/paysim.csv"
 
-def load_and_merge_kaggle_datasets(data_dir: str = "/Users/sterlingsuman/Desktop/projectx/data", use_in_memory_stream: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def load_and_merge_kaggle_datasets(
+    data_dir: str = "data",
+    max_rows: int = 500_000,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[pd.Series]]:
     """
-    Universal Kaggle Auto-Ingestion Engine with In-Memory Streaming.
-    Allows zero-disk-storage streaming directly from Kaggle/Remote API sources without saving multi-GB files locally.
+    Universal Dataset Loader for AML Transaction Analysis.
+
+    Supports multiple data sources in priority order:
+    1. Local CSV files in data/ directory (transactions.csv, customers.csv)
+    2. Any Kaggle-format CSVs (PaySim or IBM AML schema auto-detected)
+       with chunked reading & 100% label-preserving sampling.
+    3. Synthetic generation fallback for demo/hackathon mode
+
+    Returns
+    -------
+    df_transactions : pd.DataFrame
+    df_customers    : pd.DataFrame
+    customer_labels : Optional pd.Series indexed by customer_id
+                      (1 = laundering confirmed, 0 = clean) — None if unavailable.
     """
     os.makedirs(data_dir, exist_ok=True)
-    csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
     
-    df_tx_list = []
+    tx_path = os.path.join(data_dir, "transactions.csv")
+    cust_path = os.path.join(data_dir, "customers.csv")
+    
+    # Priority 1: Pre-existing normalized CSVs
+    if os.path.exists(tx_path) and os.path.exists(cust_path):
+        print("✅ Loading pre-existing transactions.csv and customers.csv from data/")
+        df_tx = pd.read_csv(tx_path)
+        df_cust = pd.read_csv(cust_path)
 
-    # 1. Local Files Inspection (if available)
+        # Ensure required columns exist
+        required_tx_cols = ["transaction_id", "customer_id", "timestamp", "amount",
+                            "transaction_type", "channel", "destination_account", "country_code"]
+        for col in required_tx_cols:
+            if col not in df_tx.columns:
+                if col == "channel":
+                    df_tx[col] = np.random.choice(["Online", "Branch", "ATM", "Mobile"], len(df_tx))
+                elif col == "destination_account":
+                    df_tx[col] = "ACC-EXTERNAL"
+                elif col == "country_code":
+                    df_tx[col] = np.random.choice(["US", "CA", "GB", "KY", "PA", "AE", "DE"], len(df_tx), p=[0.5, 0.1, 0.1, 0.1, 0.05, 0.1, 0.05])
+                else:
+                    df_tx[col] = ""
+
+        # Recover per-customer labels if an is_laundering column exists
+        customer_labels = _extract_customer_labels(df_tx)
+        return df_tx, df_cust, customer_labels
+
+    # Priority 2: Auto-detect Kaggle-format CSVs in data/
+    csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+    df_tx_list = []
+    
     for fpath in csv_files:
         fname = os.path.basename(fpath).lower()
         if fname in ["customers.csv", "customers_processed.csv"]:
             continue
-
         try:
             sample_df = pd.read_csv(fpath, nrows=5)
             cols = [c.lower().strip() for c in sample_df.columns]
 
             if "nameorig" in cols or "namedest" in cols:
-                df_raw = pd.read_csv(fpath)
+                # PaySim schema — Chunked reading with max_rows cap
+                chunks = []
+                total_read = 0
+                for chunk in pd.read_csv(fpath, chunksize=100_000):
+                    chunks.append(chunk)
+                    total_read += len(chunk)
+                    if total_read >= max_rows:
+                        print(f"⚡ [Ingestion] PaySim CSV capped at {max_rows:,} rows")
+                        break
+                df_raw = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
                 col_map = {c: c.lower().strip() for c in df_raw.columns}
                 df_raw = df_raw.rename(columns=col_map)
-                
                 base_date = datetime(2026, 6, 1)
                 timestamps = [base_date + timedelta(hours=int(s)) for s in df_raw.get("step", range(len(df_raw)))]
-
                 df_clean = pd.DataFrame({
                     "transaction_id": [f"PS-TX-{i+1:07d}" for i in range(len(df_raw))],
                     "customer_id": df_raw["nameorig"].astype(str),
                     "timestamp": timestamps,
                     "amount": df_raw["amount"].astype(float),
                     "transaction_type": df_raw["type"].astype(str),
-                    "channel": "Online",
+                    "channel": np.random.choice(["Online", "Mobile", "ATM", "Branch"], len(df_raw)),
                     "destination_account": df_raw["namedest"].astype(str),
-                    "country_code": "US"
+                    "country_code": np.random.choice(["US", "CA", "GB", "KY", "PA", "AE"], len(df_raw), p=[0.5, 0.1, 0.1, 0.1, 0.1, 0.1])
                 })
+                if "isfraud" in df_raw.columns:
+                    df_clean["is_laundering"] = df_raw["isfraud"].astype(int).values
                 df_tx_list.append(df_clean)
 
             elif "amount paid" in cols or "payment format" in cols or "from bank" in cols:
-                df_raw = pd.read_csv(fpath)
-                col_map = {c: c.lower().strip() for c in df_raw.columns}
-                df_raw = df_raw.rename(columns=col_map)
+                # IBM AML schema (ealtman2019 dataset) — Chunked & 100% Label-Preserving Sampling
+                chunks = []
+                for chunk in pd.read_csv(fpath, chunksize=100_000):
+                    chunks.append(chunk)
+                df_raw = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
+                df_raw.columns = [c.lower().strip() for c in df_raw.columns]
+
+                # Identify laundering label column if present
+                laundering_col = next((c for c in df_raw.columns if "launder" in c.lower()), None)
+                
+                # Label-preserving sampling if dataset size exceeds max_rows
+                if len(df_raw) > max_rows:
+                    if laundering_col:
+                        pos_mask = df_raw[laundering_col].astype(int) == 1
+                        pos_df = df_raw[pos_mask]
+                        neg_df = df_raw[~pos_mask]
+                        n_neg_needed = max(0, max_rows - len(pos_df))
+                        neg_sampled = neg_df.sample(n=min(n_neg_needed, len(neg_df)), random_state=42)
+                        df_raw = pd.concat([pos_df, neg_sampled]).sample(frac=1.0, random_state=42).reset_index(drop=True)
+                        print(f"⚡ [Ingestion] IBM AML Dataset sampled to {len(df_raw):,} rows (Preserved 100% of {len(pos_df):,} laundering positives)")
+                    else:
+                        df_raw = df_raw.sample(n=max_rows, random_state=42).reset_index(drop=True)
+
+                acct_col = "account" if "account" in df_raw.columns else "from bank"
+                dest_col = "account.1" if "account.1" in df_raw.columns else ("to bank" if "to bank" in df_raw.columns else acct_col)
+                amount_col = "amount paid" if "amount paid" in df_raw.columns else "amount"
+                type_col = "payment format" if "payment format" in df_raw.columns else "transaction type"
+
+                laundering_series = None
+                if laundering_col:
+                    laundering_series = pd.Series(
+                        df_raw[laundering_col].astype(int).values,
+                        name="is_laundering",
+                    )
+                    print(f"✅ [IBM AML] Found '{laundering_col}' labels — "
+                          f"{int(laundering_series.sum())} laundering / {len(laundering_series)} total rows")
 
                 df_clean = pd.DataFrame({
                     "transaction_id": [f"IBM-TX-{i+1:07d}" for i in range(len(df_raw))],
-                    "customer_id": df_raw["account"].astype(str),
-                    "timestamp": pd.to_datetime(df_raw["timestamp"]),
-                    "amount": df_raw["amount paid"].astype(float),
-                    "transaction_type": df_raw["payment format"].astype(str),
-                    "channel": "Branch",
-                    "destination_account": df_raw.get("account.1", df_raw["account"]).astype(str),
-                    "country_code": "US"
+                    "customer_id": df_raw[acct_col].astype(str),
+                    "timestamp": pd.to_datetime(df_raw["timestamp"], errors="coerce"),
+                    "amount": pd.to_numeric(df_raw[amount_col], errors="coerce").fillna(0.0),
+                    "transaction_type": df_raw[type_col].astype(str),
+                    "channel": np.random.choice(["Branch", "Wire", "Online"], len(df_raw)),
+                    "destination_account": df_raw[dest_col].astype(str),
+                    "country_code": np.random.choice(["US", "CA", "GB", "KY", "PA", "AE"], len(df_raw), p=[0.5, 0.1, 0.1, 0.1, 0.1, 0.1]),
                 })
+                if laundering_series is not None:
+                    df_clean["is_laundering"] = laundering_series.values
                 df_tx_list.append(df_clean)
 
-            elif "customer_id" in cols and "amount" in cols:
-                df_raw = pd.read_csv(fpath)
-                col_map = {c: c.lower().strip() for c in df_raw.columns}
-                df_raw = df_raw.rename(columns=col_map)
-                
-                if "transaction_id" not in df_raw.columns:
-                    df_raw["transaction_id"] = [f"TX-{i+1:07d}" for i in range(len(df_raw))]
-                if "channel" not in df_raw.columns:
-                    df_raw["channel"] = "Online"
-                if "destination_account" not in df_raw.columns:
-                    df_raw["destination_account"] = "ACC-EXTERNAL"
-                if "country_code" not in df_raw.columns:
-                    df_raw["country_code"] = "US"
-
-                df_tx_list.append(df_raw)
-
         except Exception as e:
-            print(f"Notice: Skip file {fname}: {e}")
+            print(f"Notice: Skipping file {fname}: {e}")
 
-    # 2. In-Memory Remote Streaming Layer (No Local Disk Storage Required)
-    if not df_tx_list and use_in_memory_stream:
-        print("⚡ In-Memory Mode Active: Streaming Kaggle datasets without local disk downloads...")
-        
-        # Stream PaySim sample feed into RAM
-        try:
-            print("Streaming PaySim Kaggle feed into memory...")
-            df_ps_remote = pd.read_csv(REMOTE_PAYSIM_SAMPLE_URL, nrows=10000)
-            col_map = {c: c.lower().strip() for c in df_ps_remote.columns}
-            df_ps_remote = df_ps_remote.rename(columns=col_map)
-            
-            base_date = datetime(2026, 6, 1)
-            timestamps = [base_date + timedelta(hours=int(s)) for s in df_ps_remote.get("step", range(len(df_ps_remote)))]
-
-            df_ps_clean = pd.DataFrame({
-                "transaction_id": [f"STREAM-PS-{i+1:06d}" for i in range(len(df_ps_remote))],
-                "customer_id": df_ps_remote.get("nameorig", df_ps_remote.iloc[:, 2]).astype(str),
-                "timestamp": timestamps,
-                "amount": df_ps_remote.get("amount", df_ps_remote.iloc[:, 3]).astype(float),
-                "transaction_type": df_ps_remote.get("type", "TRANSFER").astype(str),
-                "channel": "Online",
-                "destination_account": df_ps_remote.get("namedest", df_ps_remote.iloc[:, 4]).astype(str),
-                "country_code": "US"
-            })
-            df_tx_list.append(df_ps_clean)
-        except Exception as err:
-            print(f"Remote PaySim Stream Notice: {err}")
-
-    # 3. Fallback to existing transactions.csv if available
     if df_tx_list:
         df_transactions = pd.concat(df_tx_list, ignore_index=True)
     else:
-        tx_path = os.path.join(data_dir, "transactions.csv")
-        cust_path = os.path.join(data_dir, "customers.csv")
-        if os.path.exists(tx_path) and os.path.exists(cust_path):
-            return pd.read_csv(tx_path), pd.read_csv(cust_path)
-        else:
-            raise FileNotFoundError("No Kaggle dataset or stream source available.")
+        # Priority 3: Generate synthetic demo data
+        print("⚠️ No dataset found. Generating synthetic AML demo data...")
+        df_transactions = _generate_synthetic_data()
 
-    # 4. Generate customer metadata dynamically in-memory
+    # Aggregate per-customer labels from transaction-level labels (if present)
+    customer_labels = _extract_customer_labels(df_transactions)
+
+    # Generate customer metadata from transaction data
     unique_cust_ids = df_transactions["customer_id"].unique()
-    occupations = ["Software Engineer", "Consultant", "Retail Business", "Import/Export", "Real Estate", "Student", "Accountant"]
+    occupations = ["Software Engineer", "Consultant", "Retail Business", "Import/Export",
+                   "Real Estate", "Student", "Accountant", "Physician", "Attorney"]
     countries = ["US", "CA", "GB", "DE", "FR", "SG", "AE", "KY", "PA"]
-    
-    cust_path = os.path.join(data_dir, "customers.csv")
-    if os.path.exists(cust_path):
-        df_customers = pd.read_csv(cust_path)
-    else:
-        customers = []
-        for cid in unique_cust_ids:
-            customers.append({
-                "customer_id": cid,
-                "customer_name": f"Customer_{cid}",
-                "risk_rating": "Medium" if ("4521" in cid or "1089" in cid) else "Low",
-                "account_opened_date": "2023-01-15",
-                "kyc_status": "Verified",
-                "occupation": np.random.choice(occupations),
-                "country": np.random.choice(countries)
-            })
-        df_customers = pd.DataFrame(customers)
+    risk_ratings = ["Low", "Medium", "High"]
 
-    return df_transactions, df_customers
+    np.random.seed(42)
+    customers = []
+    for cid in unique_cust_ids:
+        cid_str = str(cid)
+        display_name = f"Customer_{cid_str.replace('CUST-', '') if cid_str.startswith('CUST-') else cid_str}"
+        customers.append({
+            "customer_id": cid_str,
+            "customer_name": display_name,
+            "risk_rating": np.random.choice(risk_ratings, p=[0.6, 0.25, 0.15]),
+            "account_opened_date": f"20{np.random.randint(20,26):02d}-{np.random.randint(1,13):02d}-{np.random.randint(1,29):02d}",
+            "kyc_status": np.random.choice(["Verified", "Pending", "Expired"], p=[0.7, 0.2, 0.1]),
+            "occupation": np.random.choice(occupations),
+            "country": np.random.choice(countries),
+        })
+    df_customers = pd.DataFrame(customers)
+
+    return df_transactions, df_customers, customer_labels
+
+
+def _extract_customer_labels(df_tx: pd.DataFrame) -> Optional[pd.Series]:
+    """
+    Derive a per-customer binary label (1 = launderer) from a transaction-level
+    `is_laundering` column, if it exists.
+
+    A customer is labeled 1 if ANY of their transactions is marked as laundering.
+    Returns None if the column is absent.
+    """
+    if "is_laundering" not in df_tx.columns:
+        return None
+    labels = (
+        df_tx.groupby("customer_id")["is_laundering"]
+        .max()  # 1 if any transaction is laundering
+        .astype(int)
+    )
+    n_pos = int(labels.sum())
+    print(f"✅ [Labels] {n_pos} laundering customers / {len(labels)} total customers")
+    return labels
+
+
+def _generate_synthetic_data() -> pd.DataFrame:
+    """Generates a realistic synthetic AML transaction dataset for demo purposes."""
+    np.random.seed(42)
+    n_customers = 500
+    n_transactions = 5000
+    
+    customer_ids = [f"CUST-{i:04d}" for i in range(1, n_customers + 1)]
+    tx_types = ["Deposit", "Withdrawal", "Wire", "Transfer"]
+    channels = ["Online", "Branch", "ATM", "Mobile"]
+    countries = ["US", "CA", "GB", "DE", "FR", "SG", "AE", "KY", "PA"]
+    country_probs = [0.40, 0.10, 0.10, 0.05, 0.05, 0.05, 0.10, 0.10, 0.05]
+    
+    base_date = datetime(2026, 1, 1)
+    
+    records = []
+    for i in range(n_transactions):
+        cid = np.random.choice(customer_ids)
+        amt = np.random.lognormal(mean=7.5, sigma=1.5)
+        
+        # Inject structuring patterns for ~5% of customers
+        if int(cid.split("-")[1]) < 25:
+            amt = np.random.uniform(8500, 9999)
+        
+        records.append({
+            "transaction_id": f"TX-{i+1:07d}",
+            "customer_id": cid,
+            "timestamp": (base_date + timedelta(hours=np.random.randint(0, 4320))).isoformat(),
+            "amount": round(amt, 2),
+            "transaction_type": np.random.choice(tx_types),
+            "channel": np.random.choice(channels),
+            "destination_account": f"ACC-{np.random.randint(10000, 99999)}",
+            "country_code": np.random.choice(countries, p=country_probs)
+        })
+    
+    return pd.DataFrame(records)

@@ -6,13 +6,14 @@ import numpy as np
 from typing import Dict, Any, List, Optional
 from app.nlp_parser import NLPIntentParser
 from app.kaggle_loader import load_and_merge_kaggle_datasets
+from app.ml_model import SupervisedAMLClassifier
 from app.tools import (
-    EDATool, 
-    AMLFeatureEngTool, 
-    HybridAnomalyTool, 
-    RiskClassifierTool, 
-    SingleEntityLookupTool, 
-    ThresholdStressTestTool, 
+    EDATool,
+    AMLFeatureEngTool,
+    HybridAnomalyTool,
+    RiskClassifierTool,
+    SingleEntityLookupTool,
+    ThresholdStressTestTool,
     SARGeneratorTool
 )
 
@@ -23,7 +24,7 @@ class AMLAgentOrchestrator:
     invokes relevant tools selectively, and records telemetry log.
     Data-driven & Zero Hardcoded Subject Dependencies.
     """
-    def __init__(self, data_dir: str = "/Users/sterlingsuman/Desktop/projectx/data"):
+    def __init__(self, data_dir: str = "data"):
         self.data_dir = data_dir
         self.parser = NLPIntentParser()
         self.eda_tool = EDATool()
@@ -33,17 +34,42 @@ class AMLAgentOrchestrator:
         self.single_lookup_tool = SingleEntityLookupTool()
         self.stress_test_tool = ThresholdStressTestTool()
         self.sar_tool = SARGeneratorTool()
-        
+
+        # Supervised ML classifier (XGBoost → RandomForest → IsolationForest fallback)
+        model_cache_dir = os.path.join(data_dir, "model_cache")
+        self.ml_classifier = SupervisedAMLClassifier(model_cache_dir=model_cache_dir)
+        self.model_info: Dict[str, Any] = {}
+
         self.load_data()
 
     def load_data(self):
-        # Load merged Kaggle IBM AML + PaySim dataset tables
-        self.df_transactions, self.df_customers = load_and_merge_kaggle_datasets(self.data_dir)
+        # Load merged Kaggle IBM AML + PaySim dataset tables (now also returns labels)
+        self.df_transactions, self.df_customers, self.customer_labels = \
+            load_and_merge_kaggle_datasets(self.data_dir)
 
-        # Pre-compute feature & anomaly baseline dynamically
+        # Pre-compute feature baseline
         self.df_features = self.feature_tool.run(self.df_transactions)
-        self.df_scored = self.anomaly_tool.run(self.df_features)
+
+        # Train / load supervised ML classifier — uses IBM AML labels when available
+        self.model_info = self.ml_classifier.fit_or_load(self.df_features, self.customer_labels)
+        model_type = self.model_info.get("model_type", "IsolationForest")
+        print(f"✅ [Agent] Active scorer: {model_type} "
+              f"({'supervised' if self.model_info.get('is_supervised') else 'unsupervised'})")
+
+        # Inject supervised scores into the feature frame so HybridAnomalyTool uses them
+        ml_scores = self.ml_classifier.score(self.df_features)
+        df_features_with_scores = self.df_features.copy()
+        df_features_with_scores["ml_score"] = ml_scores
+
+        self.df_scored = self.anomaly_tool.run(df_features_with_scores, use_precomputed_ml=True)
         self.df_classified = self.classifier_tool.run(self.df_scored)
+
+    def _get_ml_tool_name(self) -> str:
+        """Returns dynamic ML tool name based on active classifier mode (supervised vs unsupervised)."""
+        if self.model_info and self.model_info.get("is_supervised"):
+            mtype = self.model_info.get("model_type", "XGBoost")
+            return f"Supervised{mtype}Tool"
+        return "IsolationForestTool"
 
     def _get_top_suspicious_customer_id(self) -> str:
         """Dynamically picks top suspicious subject from the loaded dataset."""
@@ -107,9 +133,11 @@ class AMLAgentOrchestrator:
             "sar_narrative": None
         }
 
+        ml_tool_name = self._get_ml_tool_name()
+
         if intent == "GREETING":
             tools_called.append("GreetingResponseTool")
-            tools_skipped.extend(["DatasetWideMLTool", "SARGeneratorTool"])
+            tools_skipped.extend([ml_tool_name, "SARGeneratorTool"])
             execution_plan = [
                 "1. Parse conversational greeting intent",
                 "2. Provide welcoming analyst introduction & system capability overview"
@@ -128,10 +156,10 @@ class AMLAgentOrchestrator:
 
         elif intent == "CAPABILITIES_HELP":
             tools_called.append("CapabilitiesHelpTool")
-            tools_skipped.extend(["DatasetWideMLTool", "SARGeneratorTool"])
+            tools_skipped.extend([ml_tool_name, "SARGeneratorTool"])
             execution_plan = [
-                "1. Display system capabilities & query taxonomy",
-                "2. Provide sample queries across Structuring, Entity Lookup, Threshold Aggregation, EDA, and Jurisdiction Analysis"
+                "1. Parse help request intent",
+                "2. Display comprehensive system capabilities & available prompt commands"
             ]
             top_cid = self._get_top_suspicious_customer_id()
             exp = (
@@ -148,7 +176,7 @@ class AMLAgentOrchestrator:
             output_payload["explanations"].append(exp)
 
         elif intent == "TOP_RISK_SUBJECT":
-            tools_called.extend(["RiskClassifierTool", "SingleEntityLookupTool", "SARGeneratorTool"])
+            tools_called.extend([ml_tool_name, "RiskClassifierTool", "SingleEntityLookupTool", "SARGeneratorTool"])
             tools_skipped.extend(["EDATool", "ThresholdStressTestTool"])
             execution_plan = [
                 "1. Sort customer dataset by composite ML risk score descending",
@@ -175,7 +203,7 @@ class AMLAgentOrchestrator:
 
             lookup_data = self.single_lookup_tool.run(top_cid, self.df_transactions, self.df_customers, self.df_classified)
             if lookup_data.get("found") and top_row["risk_level"] == "HIGH":
-                sar_text = self.sar_tool.generate_sar(top_cid, lookup_data["customer"], lookup_data["risk_profile"], lookup_data["transaction_history"])
+                sar_text = self.sar_tool.generate_sar(top_cid, lookup_data["customer"], lookup_data["risk_profile"], lookup_data["transaction_history"], model_info=self.model_info)
                 output_payload["sar_narrative"] = sar_text
 
         elif intent == "EXPLAIN_RISK_REASON":
@@ -199,11 +227,12 @@ class AMLAgentOrchestrator:
                 if r.get("structuring_count", 0) > 0:
                     reasons.append(f"• <strong>Structuring Activity:</strong> {r['structuring_count']} cash deposits in structuring band.")
                 if r.get("rapid_cashout_count", 0) > 0:
-                    reasons.append(f"• <strong>Rapid Cash-Out Velocity:</strong> {r['rapid_cashout_count']} immediate withdrawals following large wire/deposit within 2 hours.")
+                    reasons.append(f"• <strong>Rapid Cash-Out Velocity:</strong> {r['rapid_cashout_count']} immediate withdrawal spikes within 2 hours.")
                 if r.get("high_risk_country_tx_count", 0) > 0:
                     reasons.append(f"• <strong>FATF High-Risk Jurisdiction:</strong> {r['high_risk_country_tx_count']} transactions involving off-shore codes (KY, PA, AE).")
                 if r.get("ml_score", 0) > 50.0:
-                    reasons.append(f"• <strong>ML Anomaly Detection:</strong> Isolation Forest algorithm flagged anomalous behavior (ML score: {r['ml_score']}/100).")
+                    model_label = self.model_info.get("model_type", "ML")
+                    reasons.append(f"• <strong>ML Risk Score ({model_label}):</strong> Algorithm flagged anomalous behavior (ML score: {r['ml_score']}/100).")
                 
                 reason_text = "<br>".join(reasons) if reasons else "• Standard low-risk profile with normal transaction velocity."
                 cust_name = c.get("customer_name") or c.get("customer_id") or cid
@@ -217,7 +246,7 @@ class AMLAgentOrchestrator:
                 output_payload["explanations"].append(exp)
                 
                 if r.get("risk_level") == "HIGH":
-                    sar_text = self.sar_tool.generate_sar(cid, c, r, lookup_data["transaction_history"])
+                    sar_text = self.sar_tool.generate_sar(cid, c, r, lookup_data["transaction_history"], model_info=self.model_info)
                     output_payload["sar_narrative"] = sar_text
 
         elif intent == "SINGLE_ENTITY_LOOKUP":
@@ -225,7 +254,7 @@ class AMLAgentOrchestrator:
             cid = self._find_closest_customer_id(raw_cid, entities.get("raw_cust_num")) or raw_cid
 
             tools_called.extend(["SingleEntityLookupTool", "RiskClassifierTool", "SARGeneratorTool"])
-            tools_skipped.extend(["EDATool", "DatasetWideMLTool", "ThresholdStressTestTool"])
+            tools_skipped.extend(["EDATool", ml_tool_name, "ThresholdStressTestTool"])
             
             execution_plan = [
                 f"1. Resolve target Customer ID: {cid}",
@@ -253,12 +282,12 @@ class AMLAgentOrchestrator:
                 output_payload["explanations"].append(exp_str)
                 
                 if risk_prof.get("risk_level") == "HIGH":
-                    sar_text = self.sar_tool.generate_sar(cid, cust_info, risk_prof, tx_hist)
+                    sar_text = self.sar_tool.generate_sar(cid, cust_info, risk_prof, tx_hist, model_info=self.model_info)
                     output_payload["sar_narrative"] = sar_text
 
         elif intent == "HIGH_RISK_FILTER":
             risk_flt = entities.get("risk_filter") or "HIGH"
-            tools_called.extend(["RiskClassifierTool", "HybridAnomalyTool"])
+            tools_called.extend(["RiskClassifierTool", ml_tool_name])
             tools_skipped.extend(["SingleEntityLookupTool"])
             execution_plan = [
                 f"1. Filter dataset for subjects classified as {risk_flt} RISK",
@@ -275,13 +304,13 @@ class AMLAgentOrchestrator:
             output_payload["explanations"].append(exp_str)
 
         elif intent == "STRUCTURING_SEARCH":
-            tools_called.extend(["AMLFeatureEngTool", "HybridAnomalyTool", "RiskClassifierTool", "SARGeneratorTool"])
+            tools_called.extend(["AMLFeatureEngTool", ml_tool_name, "RiskClassifierTool", "SARGeneratorTool"])
             tools_skipped.extend(["EDATool", "SingleEntityLookupTool", "ThresholdStressTestTool"])
 
             execution_plan = [
                 "1. Filter for transactions in Structuring & Smurfing patterns",
                 "2. Aggregate customer rolling transaction frequencies (AMLFeatureEngTool)",
-                "3. Execute IsolationForest ML anomaly detector & Structuring Rule Engine (HybridAnomalyTool)",
+                f"3. Execute {self.model_info.get('model_type', 'ML Classifier')} & Structuring Rule Engine",
                 "4. Classify high-risk subjects & assign escalation recommendations (RiskClassifierTool)",
                 "5. Auto-generate FinCEN SAR Narratives for top flagged subjects"
             ]
@@ -307,7 +336,8 @@ class AMLAgentOrchestrator:
                     top_subj["customer_id"], 
                     top_subj.to_dict(), 
                     top_subj.to_dict(), 
-                    self.df_transactions[self.df_transactions["customer_id"] == top_subj["customer_id"]].to_dict(orient="records")
+                    self.df_transactions[self.df_transactions["customer_id"] == top_subj["customer_id"]].to_dict(orient="records"),
+                    model_info=self.model_info
                 )
                 output_payload["sar_narrative"] = sar_text
 
@@ -350,7 +380,8 @@ class AMLAgentOrchestrator:
             if target_cc:
                 tx_filtered = self.df_transactions[self.df_transactions["country_code"] == target_cc]
                 cust_ids = tx_filtered["customer_id"].unique()
-                flagged = self.df_classified[self.df_classified["customer_id"].isin(cust_ids)].sort_values(by="high_risk_country_volume", ascending=False)
+                sort_col = "high_risk_country_volume" if "high_risk_country_volume" in self.df_classified.columns else "composite_risk_score"
+                flagged = self.df_classified[self.df_classified["customer_id"].isin(cust_ids)].sort_values(by=sort_col, ascending=False)
                 exp = f"Found <strong>{len(tx_filtered)} transactions</strong> involving jurisdiction <strong>{target_cc}</strong> totaling <strong>${tx_filtered['amount'].sum():,.2f}</strong> across {len(flagged)} customers."
             else:
                 tx_filtered = self.df_transactions[self.df_transactions["country_code"].isin(high_risk_cc)]
@@ -490,3 +521,7 @@ class AMLAgentOrchestrator:
 
     def stress_test_threshold(self, lower_bound: float) -> Dict[str, Any]:
         return self.stress_test_tool.run(self.df_transactions, self.df_features, lower_bound=lower_bound)
+
+    def get_model_info(self) -> Dict[str, Any]:
+        """Return the active ML model metadata for the /api/model/info endpoint."""
+        return self.model_info

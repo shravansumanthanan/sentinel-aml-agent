@@ -104,37 +104,43 @@ class AMLFeatureEngTool:
 
 class HybridAnomalyTool:
     """
-    Data-Driven Hybrid Anomaly Detector combining Isolation Forest (Unsupervised ML)
-    with Dataset-Dynamic Rule Evaluations.
+    Data-Driven Hybrid Anomaly Detector combining an ML scorer (supervised XGBoost
+    or unsupervised IsolationForest) with Dataset-Dynamic Rule Evaluations.
+
+    When `use_precomputed_ml=True` the caller has already injected an `ml_score`
+    column (values 0-100) produced by SupervisedAMLClassifier, so this tool skips
+    refitting its own IsolationForest and uses that column directly.
     """
-    def run(self, df_features: pd.DataFrame) -> pd.DataFrame:
+    def run(self, df_features: pd.DataFrame, use_precomputed_ml: bool = False) -> pd.DataFrame:
         df = df_features.copy()
-        
-        # 1. Dynamic Isolation Forest Outlier Detection
+
         feature_cols = [
-            "total_tx_count", "total_tx_volume", "avg_amount", 
-            "structuring_count", "rapid_cashout_count", 
+            "total_tx_count", "total_tx_volume", "avg_amount",
+            "structuring_count", "rapid_cashout_count",
             "high_risk_country_tx_count", "distinct_destination_accounts"
         ]
         X = df[feature_cols].fillna(0)
-        
-        # Compute dynamic contamination rate based on dataset outlier quantile
-        volume_95 = df["total_tx_volume"].quantile(0.95)
-        outlier_ratio = (df["total_tx_volume"] > volume_95).mean()
-        contamination = float(np.clip(outlier_ratio, 0.02, 0.15))
 
-        iso_model = IsolationForest(n_estimators=100, contamination=contamination, random_state=42)
-        df["iso_forest_anomaly_score"] = -iso_model.fit_predict(X)
-        scores = iso_model.decision_function(X)
-        
-        # Min-Max Normalization of ML Anomaly Score to [0, 100]
-        score_range = scores.max() - scores.min()
-        if score_range > 0:
-            df["ml_score"] = np.round((scores.max() - scores) / score_range * 100, 1)
+        if use_precomputed_ml and "ml_score" in df.columns:
+            # Use the supervised/unsupervised score already computed by SupervisedAMLClassifier
+            pass  # ml_score column already present — nothing to do
         else:
-            df["ml_score"] = 50.0
+            # Fallback: fit an inline IsolationForest (original behaviour)
+            volume_95 = df["total_tx_volume"].quantile(0.95)
+            outlier_ratio = (df["total_tx_volume"] > volume_95).mean()
+            contamination = float(np.clip(outlier_ratio, 0.02, 0.15))
 
-        # 2. Dynamic Rule Engine Evaluation
+            iso_model = IsolationForest(n_estimators=100, contamination=contamination, random_state=42)
+            iso_model.fit_predict(X)
+            scores = iso_model.decision_function(X)
+
+            score_range = scores.max() - scores.min()
+            if score_range > 0:
+                df["ml_score"] = np.round((scores.max() - scores) / score_range * 100, 1)
+            else:
+                df["ml_score"] = 50.0
+
+        # Rule Engine (always runs regardless of ML source)
         df["rule_structuring"] = df["structuring_count"] >= 3
         df["rule_velocity"] = df["rapid_cashout_count"] >= 1
         vol_threshold = df["total_tx_volume"].quantile(0.85)
@@ -143,15 +149,14 @@ class HybridAnomalyTool:
         df["rule_smurfing_fan_in"] = (df["distinct_destination_accounts"] >= 3) & (df["total_tx_count"] >= 4)
 
         df["rule_hits_count"] = (
-            df["rule_structuring"].astype(int) + 
-            df["rule_velocity"].astype(int) + 
-            df["rule_high_volume"].astype(int) + 
-            df["rule_high_risk_country"].astype(int) + 
+            df["rule_structuring"].astype(int) +
+            df["rule_velocity"].astype(int) +
+            df["rule_high_volume"].astype(int) +
+            df["rule_high_risk_country"].astype(int) +
             df["rule_smurfing_fan_in"].astype(int)
         )
 
-        # Dynamic Normalized Composite Score
-        # Combines ML score (40% weight) + Rule density & feature signals (60% weight)
+        # Composite score: ML 40% + Rule density 30% + Structuring 15% + Jurisdiction 15%
         rule_score = (df["rule_hits_count"] / 5.0) * 100.0
         struct_signal = np.clip((df["structuring_count"] / 5.0) * 100.0, 0, 100)
         hr_signal = np.clip((df["high_risk_country_tx_count"] / 3.0) * 100.0, 0, 100)
@@ -240,23 +245,44 @@ class SARGeneratorTool:
     Regulatory FinCEN SAR Narrative Generator.
     Produces formal human-readable FinCEN Suspicious Activity Report narratives directly from subject data.
     """
-    def generate_sar(self, customer_id: str, cust_data: Dict[str, Any], risk_profile: Dict[str, Any], tx_list: List[Dict[str, Any]]) -> str:
+    def generate_sar(
+        self,
+        customer_id: str,
+        cust_data: Dict[str, Any],
+        risk_profile: Dict[str, Any],
+        tx_list: List[Dict[str, Any]],
+        model_info: Optional[Dict[str, Any]] = None,
+    ) -> str:
         name = cust_data.get("customer_name", customer_id)
         country = cust_data.get("country", "Unknown")
         occ = cust_data.get("occupation", "Unknown")
         
         risk_score = risk_profile.get("composite_risk_score", 0)
+        ml_score = risk_profile.get("ml_score", 0)
         struct_count = risk_profile.get("structuring_count", 0)
         total_vol = risk_profile.get("total_tx_volume", 0)
         rapid_cashout = risk_profile.get("rapid_cashout_count", 0)
         hr_vol = risk_profile.get("high_risk_country_volume", 0)
+
+        # ML Model Attribution line
+        model_type = "IsolationForest (Unsupervised)"
+        model_attr = "Unsupervised Anomaly Isolation"
+        if model_info and model_info.get("is_supervised"):
+            mtype = model_info.get("model_type", "Supervised ML")
+            auc = model_info.get("auc_roc", "N/A")
+            f1 = model_info.get("f1_score", "N/A")
+            top_feats = model_info.get("feature_importances", [])[:3]
+            feat_str = ", ".join([f"{f['feature']} ({f['importance']:.2f})" for f in top_feats]) if top_feats else "None"
+            model_type = f"{mtype} (Supervised, AUC-ROC: {auc}, F1: {f1})"
+            model_attr = f"Supervised ML Probabilities + IsolationForest Hybrid. Key Signals: {feat_str}"
 
         narrative = f"""
 ================================================================================
 FINCEN SUSPICIOUS ACTIVITY REPORT (SAR) NARRATIVE
 Subject ID: {customer_id} | Name: {name}
 Occupation: {occ} | Jurisdiction: {country}
-Risk Rating: HIGH | Composite ML Risk Score: {risk_score}/100
+Risk Rating: HIGH | Composite Risk Score: {risk_score}/100 | Local ML Score: {ml_score}/100
+Model Architecture: {model_type}
 ================================================================================
 
 EXECUTIVE SUMMARY:
@@ -271,6 +297,9 @@ DETAILED PATTERN ANALYSIS:
 
 3. HIGH-RISK JURISDICTION EXPOSURE:
    Transferred ${hr_vol:,.2f} involving FATF high-risk jurisdictions (KY, PA, AE), triggering mandatory compliance escalation.
+
+4. MACHINE LEARNING ANOMALY ATTRIBUTION:
+   {model_attr}
 
 RECOMMENDED REGULATORY ACTION:
 - Status: MANDATORY REPORTING (SAR FILING REQUIRED)
