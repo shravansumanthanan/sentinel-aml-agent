@@ -140,14 +140,14 @@ class AMLAgentOrchestrator:
             tools_called.append("GreetingResponseTool")
             tools_skipped.extend([ml_tool_name, "SARGeneratorTool"])
             execution_plan = [
-                "1. Parse conversational greeting intent",
-                "2. Provide welcoming analyst introduction & system capability overview"
+                "1. Understand analyst greeting and query intent",
+                "2. Introduce SENTINEL-AML financial intelligence assistant and investigative capabilities"
             ]
             top_cid = self._get_top_suspicious_customer_id()
             exp = (
-                "👋 <strong>Hello! I am SENTINEL-AML</strong>, your autonomous compliance & anti-money laundering decision assistant.<br><br>"
-                "I can analyze transaction feeds, detect structuring patterns, run Isolation Forest anomaly scoring, and auto-generate FinCEN SARs.<br><br>"
-                "<strong>Quick Prompts to Try:</strong><br>"
+                "👋 <strong>Hello! I am SENTINEL-AML</strong>, your AI co-investigator for anti-money laundering and compliance investigations.<br><br>"
+                "I work alongside you to spot unusual customer behavior, uncover structuring patterns, evaluate offshore risk exposure, and draft SAR narratives.<br><br>"
+                "<strong>Investigative Prompts to Try:</strong><br>"
                 "• <em>'Which customer has the highest risk score?'</em><br>"
                 f"• <em>'Is {top_cid} suspicious?'</em><br>"
                 "• <em>'Find structuring patterns in the last 30 days'</em><br>"
@@ -159,8 +159,8 @@ class AMLAgentOrchestrator:
             tools_called.append("CapabilitiesHelpTool")
             tools_skipped.extend([ml_tool_name, "SARGeneratorTool"])
             execution_plan = [
-                "1. Parse help request intent",
-                "2. Display comprehensive system capabilities & available prompt commands"
+                "1. Analyze help request context",
+                "2. Display available financial intelligence workflows and investigative queries"
             ]
             top_cid = self._get_top_suspicious_customer_id()
             exp = (
@@ -180,10 +180,10 @@ class AMLAgentOrchestrator:
             tools_called.extend([ml_tool_name, "RiskClassifierTool", "SingleEntityLookupTool", "SARGeneratorTool"])
             tools_skipped.extend(["EDATool", "ThresholdStressTestTool"])
             execution_plan = [
-                "1. Sort customer dataset by composite ML risk score descending",
-                "2. Extract rank #1 subject with highest risk score",
-                "3. Display subject profile, risk breakdown, and recommended compliance escalation",
-                "4. Auto-generate FinCEN SAR narrative for top subject"
+                "1. Screen customer population for highest overall suspicious activity indicators",
+                "2. Isolate the priority subject exhibiting the most elevated risk profile",
+                "3. Present risk factor breakdown and recommended investigative escalation",
+                "4. Draft Suspicious Activity Report (SAR) narrative for regulatory filing"
             ]
 
             sorted_df = pd.merge(self.df_classified, self.df_customers, on="customer_id", how="left").sort_values(by="composite_risk_score", ascending=False)
@@ -214,9 +214,9 @@ class AMLAgentOrchestrator:
             tools_called.extend(["SingleEntityLookupTool", "RiskClassifierTool"])
             tools_skipped.extend(["EDATool", "ThresholdStressTestTool"])
             execution_plan = [
-                f"1. Extract target Customer ID: {cid}",
-                "2. Lookup single entity profile & transaction history",
-                "3. Deconstruct composite risk score into constituent risk factors"
+                f"1. Locate subject record for {cid}",
+                "2. Gather complete customer profile, transaction history, and behavioral red flags",
+                "3. Deconstruct key risk drivers and suspicious activity indicators"
             ]
             lookup_data = self.single_lookup_tool.run(cid, self.df_transactions, self.df_customers, self.df_classified)
             output_payload["results"]["single_lookup"] = lookup_data
@@ -233,7 +233,7 @@ class AMLAgentOrchestrator:
                     reasons.append(f"• <strong>FATF High-Risk Jurisdiction:</strong> {r['high_risk_country_tx_count']} transactions involving off-shore codes (KY, PA, AE).")
                 if r.get("ml_score", 0) > 50.0:
                     model_label = self.model_info.get("model_type", "ML")
-                    reasons.append(f"• <strong>ML Risk Score ({model_label}):</strong> Algorithm flagged anomalous behavior (ML score: {r['ml_score']}/100).")
+                    reasons.append(f"• <strong>Behavioral Anomaly ({model_label}):</strong> Customer behavior departs significantly from expected baseline activity (Anomaly Score: {r['ml_score']}/100).")
                 
                 reason_text = "<br>".join(reasons) if reasons else "• Standard low-risk profile with normal transaction velocity."
                 cust_name = c.get("customer_name") or c.get("customer_id") or cid
@@ -259,9 +259,9 @@ class AMLAgentOrchestrator:
             
             execution_plan = [
                 f"1. Resolve target Customer ID: {cid}",
-                "2. Perform single-entity database lookup (SingleEntityLookupTool)",
-                "3. Compute individual risk profile & rule hits (RiskClassifierTool)",
-                "4. Auto-generate FinCEN SAR Narrative if high risk (SARGeneratorTool)"
+                "2. Retrieve single-entity profile and complete transaction history",
+                "3. Evaluate individual risk factors and red flag triggers",
+                "4. Draft FinCEN SAR Narrative if high risk"
             ]
 
             lookup_data = self.single_lookup_tool.run(cid, self.df_transactions, self.df_customers, self.df_classified)
@@ -291,17 +291,17 @@ class AMLAgentOrchestrator:
             tools_called.extend(["RiskClassifierTool", ml_tool_name])
             tools_skipped.extend(["SingleEntityLookupTool"])
             execution_plan = [
-                f"1. Filter dataset for subjects classified as {risk_flt} RISK",
-                "2. Sort by composite ML risk score descending",
-                "3. Present flagged subjects for compliance review"
+                f"1. Filter customer population for subjects evaluated as {risk_flt} RISK",
+                "2. Rank subjects by overall suspicious activity score",
+                "3. Present prioritized case file table for analyst review"
             ]
             flagged = self.df_classified[self.df_classified["risk_level"] == risk_flt].sort_values(by="composite_risk_score", ascending=False)
             merged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
             output_payload["results"]["flagged_table"] = self._clean_records(merged)
             
             top_subj = merged.iloc[0] if not merged.empty else None
-            top_info = f" (Top: <strong>{top_subj['customer_id']}</strong> with score {top_subj['composite_risk_score']}/100)" if top_subj is not None else ""
-            exp_str = f"Filtered <strong>{len(flagged)} subjects</strong> classified as <strong>{risk_flt} RISK</strong>{top_info}. Check the Flagged Risk Table for details."
+            top_info = f" (Top Subject: <strong>{top_subj['customer_id']}</strong> with score {top_subj['composite_risk_score']}/100)" if top_subj is not None else ""
+            exp_str = f"Filtered <strong>{len(flagged)} subjects</strong> evaluated as <strong>{risk_flt} RISK</strong>{top_info}. Check the Flagged Risk Table for details."
             output_payload["explanations"].append(exp_str)
 
         elif intent == "STRUCTURING_SEARCH":
@@ -309,11 +309,11 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["EDATool", "SingleEntityLookupTool", "ThresholdStressTestTool"])
 
             execution_plan = [
-                "1. Filter for transactions in Structuring & Smurfing patterns",
-                "2. Aggregate customer rolling transaction frequencies (AMLFeatureEngTool)",
-                f"3. Execute {self.model_info.get('model_type', 'ML Classifier')} & Structuring Rule Engine",
-                "4. Classify high-risk subjects & assign escalation recommendations (RiskClassifierTool)",
-                "5. Auto-generate FinCEN SAR Narratives for top flagged subjects"
+                "1. Scan transaction ledger for structured deposit and smurfing patterns",
+                "2. Evaluate deposit frequencies near statutory reporting limits ($10,000)",
+                "3. Identify subjects repeatedly making cash deposits just under reporting thresholds",
+                "4. Classify high-risk subjects and assign compliance escalation recommendations",
+                "5. Draft FinCEN Suspicious Activity Report (SAR) narratives for top flagged subjects"
             ]
 
             flagged = self.df_classified[self.df_classified["structuring_count"] > 0].sort_values(by="composite_risk_score", ascending=False)
@@ -348,9 +348,9 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["EDATool", "SARGeneratorTool"])
 
             execution_plan = [
-                f"1. Filter transaction ledger for entries with amount >= ${min_amt:,.2f}",
-                "2. Join customer metadata and compute aggregated transaction volume",
-                "3. Rank subjects by total large transaction volume"
+                f"1. Filter transaction ledger for high-value transfers (>= ${min_amt:,.2f})",
+                "2. Identify associated account holders and aggregate capital movements",
+                "3. Rank subjects by total high-value transaction volume"
             ]
 
             large_txs = self.df_transactions[self.df_transactions["amount"] >= min_amt]
@@ -372,9 +372,9 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["SingleEntityLookupTool"])
 
             execution_plan = [
-                "1. Filter transaction history for FATF Grey/Blacklist country codes (KY, PA, AE)",
-                "2. Aggregate volume and transaction counts per jurisdiction",
-                "3. Flag subjects with cross-border offshore transfers"
+                "1. Cross-reference transactions with FATF high-risk offshore jurisdictions (KY, PA, AE)",
+                "2. Measure cross-border transaction volume and transfer counts per jurisdiction",
+                "3. Flag subjects engaging in capital flow through high-risk offshore channels"
             ]
 
             if target_cc:
@@ -402,9 +402,9 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["SARGeneratorTool"])
 
             execution_plan = [
-                f"1. Filter dataset for transaction type: {tx_type}",
-                "2. Calculate total volume and count breakdown",
-                "3. Display customer rankings for this transaction channel"
+                f"1. Isolate transactions by channel: {tx_type}",
+                "2. Calculate total volume and transaction count breakdown",
+                "3. Rank customers by total activity through this transaction channel"
             ]
 
             filtered_tx = self.df_transactions[self.df_transactions["transaction_type"].str.lower() == tx_type.lower()]
@@ -426,9 +426,9 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["SingleEntityLookupTool"])
 
             execution_plan = [
-                "1. Aggregate Risk Rating distribution across all active customer profiles",
-                f"2. Filter for {risk_flt} risk category",
-                "3. Calculate population percentages and escalation actions"
+                "1. Analyze Risk Rating distribution across all active customer profiles",
+                f"2. Focus on {risk_flt} risk population",
+                "3. Calculate population proportions and required compliance actions"
             ]
 
             counts = self.df_classified["risk_level"].value_counts().to_dict()
@@ -458,10 +458,10 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["EDATool", "IsolationForestMLTool", "SARGeneratorTool"])
 
             execution_plan = [
-                f"1. Apply direct threshold rule: transactions < ${max_amt:,.2f} with count >= {min_count}",
-                "2. Perform group-by aggregation on transaction table (Skip ML Anomaly Scoring)",
-                "3. Compute total volume and customer breakdown",
-                "4. Return instant compliance table"
+                f"1. Isolate accounts with repeated transactions bounded under ${max_amt:,.2f} (count >= {min_count})",
+                "2. Aggregate cumulative volume and transaction counts for target subjects",
+                "3. Flag potential threshold avoidance behavior for investigator review",
+                "4. Present structured compliance review table"
             ]
 
             if has_max_amt:
@@ -486,10 +486,10 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["SingleEntityLookupTool", "SARGeneratorTool"])
 
             execution_plan = [
-                "1. Load complete transaction and customer baseline datasets",
-                "2. Calculate dataset summary metrics, distributions, and top volume subjects (EDATool)",
-                "3. Generate distribution histograms & risk rating breakdown",
-                "4. Display baseline profiling overview"
+                "1. Access complete transaction ledger and customer portfolio data",
+                "2. Compile portfolio-wide volume statistics, average transaction sizes, and distribution metrics",
+                "3. Evaluate overall transaction health and risk distribution across subjects",
+                "4. Display baseline financial intelligence overview"
             ]
 
             eda_res = self.eda_tool.run(self.df_transactions, self.df_customers)
@@ -509,10 +509,10 @@ class AMLAgentOrchestrator:
             tools_skipped.extend(["SingleEntityLookupTool"])
 
             execution_plan = [
-                "1. Parse analytical query context",
-                "2. Execute batch AML feature extraction and Isolation Forest ML scoring",
-                "3. Filter high & medium risk subjects requiring analyst review",
-                "4. Present top suspicious subjects with escalation guidance"
+                "1. Understand query context and investigative intent",
+                "2. Screen customer transaction activity for unusual behavior compared to baseline norms",
+                "3. Filter high and medium risk subjects requiring analyst review",
+                "4. Present prioritized suspicious subjects with escalation guidance"
             ]
             
             high_risk = self.df_classified[self.df_classified["risk_level"].isin(["HIGH", "MEDIUM"])].sort_values(by="composite_risk_score", ascending=False)
@@ -521,7 +521,7 @@ class AMLAgentOrchestrator:
             
             top_subj = merged.iloc[0] if not merged.empty else None
             top_info = f" Top Subject: <strong>{top_subj['customer_id']}</strong> ({top_subj.get('customer_name', top_subj['customer_id'])}) with Risk Score <strong>{top_subj['composite_risk_score']}/100</strong>." if top_subj is not None else ""
-            exp_str = f"Identified <strong>{len(high_risk)} suspicious subjects</strong> requiring compliance review.{top_info}"
+            exp_str = f"Identified <strong>{len(high_risk)} suspicious subjects</strong> whose activity looks unusual compared to baseline norms.{top_info}"
             output_payload["explanations"].append(exp_str)
 
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
