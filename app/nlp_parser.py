@@ -8,6 +8,17 @@ class NLPIntentParser:
     Guarantees robust intent classification for any query formulation.
     """
     
+    def __init__(self):
+        # Pre-compiled regular expressions for optimal parsing performance
+        self.pat_cust_explicit = re.compile(r'(?:cust-?|customer\s*(?:id)?\s*#?)\s*([0-9]{1,5})')
+        self.pat_cust_bare = re.compile(r'(?<![\$,])\b([0-9]{4})\b(?![,0-9])')
+        self.pat_time_window = re.compile(r'(?:last|past|in\s*the)\s*([0-9]+)\s*(?:days?|d)')
+        self.pat_max_amt = re.compile(r'(?:under|below|less\s*than|<)\s*\$?([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)')
+        self.pat_min_amt = re.compile(r'(?:above|over|greater\s*than|more\s*than|>)\s*\$?([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)\s*(k)?')
+        self.pat_min_count_plus = re.compile(r'([0-9]+)\+\s*(?:transactions|txns|tx|deposits)?')
+        self.pat_min_count_comp = re.compile(r'(?:more\s*than|>|at\s*least)\s*([0-9]+)\s*(?:txns|transactions)?')
+        self.pat_country = re.compile(r'\b(ky|pa|ae|us|gb|ca|de|fr|sg)\b')
+
     def parse_query(self, query: str) -> Dict[str, Any]:
         query_lower = query.lower().strip()
         
@@ -33,10 +44,10 @@ class NLPIntentParser:
             return {"query": query, "intent": intent, "entities": entities}
 
         # 2. Extract Customer ID (e.g., CUST-4521, 4521, customer 1089, cust 420)
-        cust_match = re.search(r'(?:cust-?|customer\s*(?:id)?\s*#?)\s*([0-9]{1,5})', query_lower)
+        cust_match = self.pat_cust_explicit.search(query_lower)
         if not cust_match:
             # Only match a bare 4-digit number if NOT preceded by a currency sign or comma
-            cust_match = re.search(r'(?<![\$,])\b([0-9]{4})\b(?![,0-9])', query_lower)
+            cust_match = self.pat_cust_bare.search(query_lower)
         
         if cust_match:
             cust_num = cust_match.group(1)
@@ -44,7 +55,7 @@ class NLPIntentParser:
             entities["customer_id"] = f"CUST-{int(cust_num):04d}" if len(cust_num) < 4 else f"CUST-{cust_num}"
 
         # 3. Extract Time Window (e.g., "last 30 days", "7d", "past week")
-        time_match = re.search(r'(?:last|past|in\s*the)\s*([0-9]+)\s*(?:days?|d)', query_lower)
+        time_match = self.pat_time_window.search(query_lower)
         if time_match:
             entities["time_window_days"] = int(time_match.group(1))
         elif "week" in query_lower:
@@ -53,22 +64,22 @@ class NLPIntentParser:
             entities["time_window_days"] = 30
 
         # 4. Extract Max Amount Threshold (e.g., "under $10,000", "< 10000", "below 9500")
-        max_amt_match = re.search(r'(?:under|below|less\s*than|<)\s*\$?([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)', query_lower)
+        max_amt_match = self.pat_max_amt.search(query_lower)
         if max_amt_match:
             val_str = max_amt_match.group(1).replace(',', '')
             entities["max_amount"] = float(val_str)
 
         # 5. Extract Min Amount Threshold (e.g., "above $50,000", "> 100000", "over 50k", "more than $25,000")
-        min_amt_match = re.search(r'(?:above|over|greater\s*than|more\s*than|>)\s*\$?([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)\s*(k)?', query_lower)
+        min_amt_match = self.pat_min_amt.search(query_lower)
         if min_amt_match:
             val_str = min_amt_match.group(1).replace(',', '')
             mult = 1000.0 if min_amt_match.group(2) else 1.0
             entities["min_amount"] = float(val_str) * mult
 
         # 6. Extract Min Transaction Count (e.g., "10+ transactions", "5 or more", "more than 8")
-        min_count_match = re.search(r'([0-9]+)\+\s*(?:transactions|txns|tx|deposits)?', query_lower)
+        min_count_match = self.pat_min_count_plus.search(query_lower)
         if not min_count_match and not entities["min_amount"]:
-            min_count_match = re.search(r'(?:more\s*than|>|at\s*least)\s*([0-9]+)\s*(?:txns|transactions)?', query_lower)
+            min_count_match = self.pat_min_count_comp.search(query_lower)
         if min_count_match:
             entities["min_count"] = int(min_count_match.group(1))
 
@@ -91,7 +102,7 @@ class NLPIntentParser:
             entities["transaction_type"] = "Transfer"
 
         # 9. Extract Country / Jurisdiction
-        country_match = re.search(r'\b(ky|pa|ae|us|gb|ca|de|fr|sg)\b', query_lower)
+        country_match = self.pat_country.search(query_lower)
         if country_match:
             entities["country_code"] = country_match.group(1).upper()
 

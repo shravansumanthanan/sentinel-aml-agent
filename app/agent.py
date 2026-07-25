@@ -14,7 +14,8 @@ from app.tools import (
     RiskClassifierTool,
     SingleEntityLookupTool,
     ThresholdStressTestTool,
-    SARGeneratorTool
+    SARGeneratorTool,
+    HIGH_RISK_JURISDICTIONS
 )
 
 class AMLAgentOrchestrator:
@@ -376,7 +377,6 @@ class AMLAgentOrchestrator:
                 "3. Flag subjects with cross-border offshore transfers"
             ]
 
-            high_risk_cc = ["KY", "PA", "AE"]
             if target_cc:
                 tx_filtered = self.df_transactions[self.df_transactions["country_code"] == target_cc]
                 cust_ids = tx_filtered["customer_id"].unique()
@@ -384,10 +384,11 @@ class AMLAgentOrchestrator:
                 flagged = self.df_classified[self.df_classified["customer_id"].isin(cust_ids)].sort_values(by=sort_col, ascending=False)
                 exp = f"Found <strong>{len(tx_filtered)} transactions</strong> involving jurisdiction <strong>{target_cc}</strong> totaling <strong>${tx_filtered['amount'].sum():,.2f}</strong> across {len(flagged)} customers."
             else:
-                tx_filtered = self.df_transactions[self.df_transactions["country_code"].isin(high_risk_cc)]
+                tx_filtered = self.df_transactions[self.df_transactions["country_code"].isin(HIGH_RISK_JURISDICTIONS)]
                 flagged = self.df_classified[self.df_classified["high_risk_country_tx_count"] > 0].sort_values(by="high_risk_country_volume", ascending=False)
+                cc_str = ", ".join(HIGH_RISK_JURISDICTIONS)
                 exp = (
-                    f"Found <strong>{len(tx_filtered)} transactions</strong> in FATF High-Risk Jurisdictions (KY, PA, AE) "
+                    f"Found <strong>{len(tx_filtered)} transactions</strong> in FATF High-Risk Jurisdictions ({cc_str}) "
                     f"totaling <strong>${tx_filtered['amount'].sum():,.2f}</strong> across <strong>{len(flagged)} subjects</strong>."
                 )
 

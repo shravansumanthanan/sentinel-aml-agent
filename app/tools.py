@@ -3,6 +3,9 @@ import numpy as np
 from typing import Dict, Any, List, Optional
 from sklearn.ensemble import IsolationForest
 
+# Centralized FATF High-Risk Jurisdictions (Grey / Blacklist)
+HIGH_RISK_JURISDICTIONS: List[str] = ["KY", "PA", "AE"]
+
 class EDATool:
     """Performs automated exploratory data analysis and summary statistics on loaded datasets."""
     def run(self, df_tx: pd.DataFrame, df_cust: pd.DataFrame) -> Dict[str, Any]:
@@ -84,8 +87,7 @@ class AMLFeatureEngTool:
         features["rapid_cashout_count"] = features["rapid_cashout_count"].fillna(0).astype(int)
 
         # 5. High-Risk Jurisdiction Feature (FATF Grey/Blacklist)
-        high_risk_jurisdictions = ["KY", "PA", "AE"]
-        hr_txs = df[df["country_code"].isin(high_risk_jurisdictions)]
+        hr_txs = df[df["country_code"].isin(HIGH_RISK_JURISDICTIONS)]
         hr_counts = hr_txs.groupby("customer_id").size().reset_index(name="high_risk_country_tx_count")
         hr_vol = hr_txs.groupby("customer_id")["amount"].sum().reset_index(name="high_risk_country_volume")
 

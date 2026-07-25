@@ -47,6 +47,23 @@ class TestSentinelAMLNLPParsing(unittest.TestCase):
         res = self.parser.parse_query("Show transactions in FATF high risk countries")
         self.assertEqual(res["intent"], "JURISDICTION_ANALYSIS")
 
+    def test_nlp_intent_edge_cases(self):
+        """Parametrized subtests for query variations, uppercase terms, and entity edge cases."""
+        cases = [
+            ("Find STRUCTURING patterns", "STRUCTURING_SEARCH", {"pattern_type": "STRUCTURING"}),
+            ("check cust 0150", "SINGLE_ENTITY_LOOKUP", {"customer_id": "CUST-0150"}),
+            ("Show transactions in FATF grey list jurisdictions", "JURISDICTION_ANALYSIS", {}),
+            ("Filter by GRAY LIST countries", "JURISDICTION_ANALYSIS", {}),
+            ("Analyze transactions over 50k", "LARGE_AMOUNT_FILTER", {"min_amount": 50000.0}),
+            ("Is cust 420 suspicious?", "SINGLE_ENTITY_LOOKUP", {"customer_id": "CUST-0420"}),
+        ]
+        for query, expected_intent, expected_entities in cases:
+            with self.subTest(query=query):
+                res = self.parser.parse_query(query)
+                self.assertEqual(res["intent"], expected_intent, f"Failed intent for query: {query}")
+                for key, val in expected_entities.items():
+                    self.assertEqual(res["entities"][key], val, f"Failed entity '{key}' for query: {query}")
+
 
 class TestSupervisedAMLClassifier(unittest.TestCase):
     """Unit tests for ML Classifier (Hybrid Supervised & Unsupervised)."""
