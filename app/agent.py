@@ -494,7 +494,12 @@ class AMLAgentOrchestrator:
 
             eda_res = self.eda_tool.run(self.df_transactions, self.df_customers)
             output_payload["results"]["eda"] = eda_res
-            exp_str = f"Dataset contains <strong>{eda_res['summary']['total_transactions']} transactions</strong> across <strong>{eda_res['summary']['unique_customers']} unique customers</strong> with <strong>${eda_res['summary']['total_volume']:,.2f}</strong> total volume."
+            exp_str = (
+                f"Dataset contains <strong>{eda_res['summary']['total_transactions']:,} transactions</strong> across "
+                f"<strong>{eda_res['summary']['unique_customers']:,} unique customers</strong> with "
+                f"<strong>${eda_res['summary']['total_volume']:,.2f}</strong> total volume "
+                f"(Average transaction amount: <strong>${eda_res['summary']['average_amount']:,.2f}</strong>)."
+            )
             output_payload["explanations"].append(exp_str)
 
         else:

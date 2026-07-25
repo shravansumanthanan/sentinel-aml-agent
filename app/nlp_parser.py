@@ -134,7 +134,7 @@ class NLPIntentParser:
             intent = "LARGE_AMOUNT_FILTER"
         elif "country" in query_lower or "jurisdiction" in query_lower or "fatf" in query_lower or "grey list" in query_lower or "gray list" in query_lower or entities["country_code"]:
             intent = "JURISDICTION_ANALYSIS"
-        elif "eda" in query_lower or "profile" in query_lower or "summary" in query_lower or "distribution" in query_lower or "baseline" in query_lower or "total volume" in query_lower or "stats" in query_lower:
+        elif "eda" in query_lower or "profile" in query_lower or "summary" in query_lower or "distribution" in query_lower or "baseline" in query_lower or "total volume" in query_lower or "stats" in query_lower or "average" in query_lower or "avg" in query_lower or "mean" in query_lower or "median" in query_lower or "transaction size" in query_lower:
             intent = "FULL_EDA"
         elif entities["risk_filter"] or "flag" in query_lower or "anomal" in query_lower or "suspicious" in query_lower:
             intent = "HIGH_RISK_FILTER"

@@ -59,6 +59,9 @@ class TestSentinelAMLNLPParsing(unittest.TestCase):
             ("Which customers made more than 10 transactions under £10,000?", "THRESHOLD_AGGREGATION", {"min_count": 10, "max_amount": 10000.0, "min_amount": None}),
             ("Which customers made more than 5 transactions under €5,000?", "THRESHOLD_AGGREGATION", {"min_count": 5, "max_amount": 5000.0, "min_amount": None}),
             ("Which customers made more than 12 transactions under ₹50,000?", "THRESHOLD_AGGREGATION", {"min_count": 12, "max_amount": 50000.0, "min_amount": None}),
+            ("Average transaction amount?", "FULL_EDA", {}),
+            ("what is the mean transaction size?", "FULL_EDA", {}),
+            ("overall avg amount", "FULL_EDA", {}),
         ]
         for query, expected_intent, expected_entities in cases:
             with self.subTest(query=query):
