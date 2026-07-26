@@ -19,9 +19,13 @@ from app.main import (
     model_info_endpoint,
     chat_endpoint,
     stress_test_endpoint,
+    upload_dataset_endpoint,
     ChatRequest,
     StressTestRequest,
 )
+from fastapi import HTTPException, UploadFile
+import io
+import asyncio
 
 
 class TestSentinelAMLNLPParsing(unittest.TestCase):
@@ -68,6 +72,7 @@ class TestSentinelAMLNLPParsing(unittest.TestCase):
             ("Maximum transaction size", "FULL_EDA", {}),
             ("Which countries?", "JURISDICTION_ANALYSIS", {}),
             ("Which jurisdictions?", "JURISDICTION_ANALYSIS", {}),
+            ("Which customer has the lowest risk score?", "LOWEST_RISK_SUBJECT", {}),
         ]
         for query, expected_intent, expected_entities in cases:
             with self.subTest(query=query):
@@ -108,7 +113,7 @@ class TestSupervisedAMLClassifier(unittest.TestCase):
         n = 200
         df_feat = pd.DataFrame(np.random.randn(n, len(FEATURE_COLS)), columns=FEATURE_COLS)
         df_feat["customer_id"] = [f"CUST-{i:04d}" for i in range(n)]
-        labels = pd.Series(np.random.choice([0, 1], size=n, p=[0.85, 0.15]), index=df_feat.index)
+        labels = pd.Series(np.random.choice([0, 1], size=n, p=[0.85, 0.15]), index=df_feat["customer_id"])
 
         info = self.clf.fit(df_feat, labels=labels)
         self.assertTrue(info["is_supervised"])
@@ -145,12 +150,20 @@ class TestFastAPIEndpoints(unittest.TestCase):
         self.assertEqual(res["lower_bound"], 8500.0)
         self.assertIn("interpretation", res)
 
+    def test_upload_dataset_endpoint_validation(self):
+        """Validates that non-CSV uploads raise 400 Bad Request."""
+        invalid_file = UploadFile(filename="invalid.txt", file=io.BytesIO(b"dummy data"))
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(upload_dataset_endpoint(transactions_file=invalid_file))
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn(".csv file", ctx.exception.detail)
+
 
 class TestAIRegressionGuard(unittest.TestCase):
     """
     AI Regression Guard Suite.
     Catches AI-specific blind spots: payload contract drift, missing telemetry keys,
-    and cross-platform data generator path bugs.
+    upload contract parity, and cross-platform data generator path bugs.
     """
 
     def test_ai_regression_response_payload_contract(self):
@@ -173,6 +186,33 @@ class TestAIRegressionGuard(unittest.TestCase):
         self.assertIn("tools_skipped", telemetry)
         self.assertIn("latency_ms", telemetry)
         self.assertIsInstance(telemetry["latency_ms"], (int, float))
+
+    def test_ai_regression_upload_payload_contract(self):
+        """BUG-REGRESSION: Ensures CSV upload endpoint always returns required top-level contract keys."""
+        import shutil
+        tx_path = os.path.join(PROJECT_ROOT, "data", "transactions.csv")
+        cust_path = os.path.join(PROJECT_ROOT, "data", "customers.csv")
+        tx_bak = tx_path + ".bak"
+        cust_bak = cust_path + ".bak"
+        if os.path.exists(tx_path): shutil.copy(tx_path, tx_bak)
+        if os.path.exists(cust_path): shutil.copy(cust_path, cust_bak)
+
+        try:
+            sample_csv = b"transaction_id,customer_id,timestamp,amount,transaction_type,channel,destination_account,country_code,is_laundering\nTX-001,CUST-001,2026-01-01 10:00:00,5000.0,Deposit,Branch,ACC-1,US,0\n"
+            tx_file = UploadFile(filename="transactions.csv", file=io.BytesIO(sample_csv))
+            res = asyncio.run(upload_dataset_endpoint(transactions_file=tx_file))
+
+            required_keys = ["status", "filename", "total_transactions", "unique_customers", "active_model", "is_supervised", "message"]
+            for key in required_keys:
+                self.assertIn(key, res, f"AI Regression Guard: Upload response missing mandatory contract key '{key}'")
+            self.assertEqual(res["status"], "success")
+        finally:
+            if os.path.exists(tx_bak):
+                shutil.move(tx_bak, tx_path)
+            if os.path.exists(cust_bak):
+                shutil.move(cust_bak, cust_path)
+            from app.main import _get_orchestrator
+            _get_orchestrator().load_data()
 
     def test_ai_regression_synthetic_data_generator_parity(self):
         """BUG-REGRESSION: data_generator must run cleanly without throwing path or permission errors."""

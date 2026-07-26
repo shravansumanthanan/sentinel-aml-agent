@@ -102,18 +102,24 @@ function initCharts(distributions) {
     Chart.defaults.color = '#94a3b8';
     Chart.defaults.font.family = "'Outfit', system-ui, -apple-system, sans-serif";
     
-    // 1. Customer Risk Breakdown Chart
+    // 1. Dynamic Customer Risk Breakdown Chart
     const riskEl = document.getElementById('riskChart');
     if (riskEl) {
+        const riskDist = distributions.customer_risk_ratings || { High: 0, Medium: 0, Low: 0 };
+        const riskLabels = Object.keys(riskDist).map(k => k.toUpperCase() + ' RISK');
+        const riskValues = Object.values(riskDist);
+        const colorMap = { 'HIGH RISK': '#ef4444', 'MEDIUM RISK': '#f59e0b', 'LOW RISK': '#10b981' };
+        const bgColors = riskLabels.map(l => colorMap[l] || '#6366f1');
+
         const riskCtx = riskEl.getContext('2d');
         if (charts.risk) charts.risk.destroy();
         charts.risk = new Chart(riskCtx, {
             type: 'doughnut',
             data: {
-                labels: ['HIGH RISK', 'MEDIUM RISK', 'LOW RISK'],
+                labels: riskLabels,
                 datasets: [{
-                    data: [15, 25, 60], // Population Distribution %
-                    backgroundColor: ['#ef4444', '#f59e0b', '#10b981'],
+                    data: riskValues,
+                    backgroundColor: bgColors,
                     borderWidth: 0,
                     hoverOffset: 6
                 }]
@@ -132,19 +138,26 @@ function initCharts(distributions) {
         });
     }
 
-    // 2. FATF High Risk Jurisdiction Chart
+    // 2. Dynamic FATF High Risk Jurisdiction Chart
     const jurEl = document.getElementById('jurisdictionChart');
     if (jurEl) {
+        const jurDist = distributions.jurisdiction_volumes || {};
+        const jurLabels = Object.keys(jurDist);
+        const jurValues = Object.values(jurDist);
+
+        const highRiskSet = new Set(['KY', 'PA', 'AE', 'IR', 'KP']);
+        const barColors = jurLabels.map(code => highRiskSet.has(code.toUpperCase()) ? '#ef4444' : '#6366f1');
+
         const jurCtx = jurEl.getContext('2d');
         if (charts.jurisdiction) charts.jurisdiction.destroy();
         charts.jurisdiction = new Chart(jurCtx, {
             type: 'bar',
             data: {
-                labels: ['US', 'KY (Cayman)', 'PA (Panama)', 'AE (UAE)', 'GB', 'DE'],
+                labels: jurLabels,
                 datasets: [{
                     label: 'Volume ($)',
-                    data: [4200000, 1850000, 1420000, 980000, 750000, 520000],
-                    backgroundColor: ['#6366f1', '#ef4444', '#ef4444', '#f59e0b', '#6366f1', '#6366f1'],
+                    data: jurValues,
+                    backgroundColor: barColors,
                     borderRadius: 6
                 }]
             },
@@ -154,7 +167,7 @@ function initCharts(distributions) {
                 scales: {
                     y: { 
                         grid: { color: 'rgba(255,255,255,0.05)' },
-                        ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'k' }
+                        ticks: { callback: v => '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v) }
                     },
                     x: { grid: { display: false } }
                 },
@@ -344,6 +357,9 @@ function setupEventListeners() {
             if (display) display.textContent = '$' + parseInt(slider.value).toLocaleString();
         });
     }
+
+    // CSV Upload Modal & Drag-and-Drop Handlers
+    setupUploadModal();
 }
 
 async function submitQuery() {
@@ -358,7 +374,7 @@ async function submitQuery() {
     agentMsgDiv.className = 'message agent';
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     agentMsgDiv.innerHTML = `
-        <div class="agent-avatar">
+        <div class="agent-avatar" title="Sentinel Engine">
             <svg width="14" height="14" viewBox="0 0 32 32" fill="none"><path d="M16 2L4 8V16C4 23.1 9.4 29.7 16 31C22.6 29.7 28 23.1 28 16V8L16 2Z" fill="currentColor"/></svg>
         </div>
         <div class="message-bubble">
@@ -397,13 +413,22 @@ async function submitQuery() {
         const data = await res.json();
         
         // Multi-step trace execution UI feedback
-        processingDiv.innerHTML = '';
+        processingDiv.innerHTML = `
+            <div class="execution-trace-card">
+                <div class="trace-card-header">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    <span>DAG Execution Pipeline</span>
+                </div>
+                <div class="trace-card-body" id="trace-steps-body"></div>
+            </div>
+        `;
+        const traceBody = document.getElementById('trace-steps-body');
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
         
         const step1 = document.createElement('div');
         step1.className = 'trace-step';
-        step1.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Parsed Intent: <strong>${data.parsed_intent}</strong>`;
-        processingDiv.appendChild(step1);
+        step1.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Parsed Intent: <strong>${escapeHTML(data.parsed_intent || 'GENERAL_QUERY')}</strong>`;
+        if (traceBody) traceBody.appendChild(step1);
         scrollToBottom();
         
         await delay(250);
@@ -412,8 +437,8 @@ async function submitQuery() {
             for (let i = 0; i < data.telemetry.execution_plan.length; i++) {
                 const stepDiv = document.createElement('div');
                 stepDiv.className = 'trace-step';
-                stepDiv.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> ${data.telemetry.execution_plan[i]}`;
-                processingDiv.appendChild(stepDiv);
+                stepDiv.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> ${escapeHTML(data.telemetry.execution_plan[i])}`;
+                if (traceBody) traceBody.appendChild(stepDiv);
                 scrollToBottom();
                 await delay(200);
             }
@@ -421,12 +446,8 @@ async function submitQuery() {
         
         const finalDiv = document.createElement('div');
         finalDiv.className = 'trace-final';
+        finalDiv.innerHTML = formatAgentExplanations(data.explanations);
         
-        let explanationText = data.explanations ? data.explanations.join('<br><br>') : 'Investigation complete.';
-        explanationText = explanationText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        explanationText = explanationText.replace(/\n/g, '<br>');
-        
-        finalDiv.innerHTML = explanationText;
         processingDiv.appendChild(finalDiv);
         processingDiv.removeAttribute('id');
         scrollToBottom();
@@ -435,7 +456,7 @@ async function submitQuery() {
         updateWorkbench(data);
 
     } catch (e) {
-        processingDiv.innerHTML = `<span style="color: #ef4444; font-weight: 500;">Investigation Error: ${e.message || 'Unable to process query.'}</span>`;
+        processingDiv.innerHTML = `<div class="aml-card aml-risk-card"><div class="aml-card-body" style="color: #ef4444; font-weight: 500;">⚠️ Investigation Error: ${escapeHTML(e.message || 'Unable to process query.')}</div></div>`;
         processingDiv.removeAttribute('id');
         setDAGState('Execution Error');
         console.error("Chat error:", e);
@@ -444,11 +465,93 @@ async function submitQuery() {
     }
 }
 
+function formatAgentExplanations(explanations) {
+    if (!explanations || explanations.length === 0) {
+        return `<div class="aml-card aml-info-card"><div class="aml-card-body">Investigation complete. No additional telemetry emitted.</div></div>`;
+    }
+
+    const formattedList = [];
+
+    explanations.forEach(exp => {
+        if (!exp) return;
+        const strExp = String(exp).trim();
+
+        if (strExp.startsWith('<div class=\'aml-card') || strExp.startsWith('<div class="aml-card')) {
+            formattedList.push(strExp);
+            return;
+        }
+
+        let content = strExp;
+        if (!content.includes('<') && !content.includes('>')) {
+            content = escapeHTML(content);
+        }
+
+        content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        content = content.replace(/`([^`]+)`/g, '<code>$1</code>');
+        content = content.replace(/^### (.*$)/gim, '<h4 class="aml-narrative-title" style="margin-top:0.4rem; color:var(--text-1); font-weight:600;">$1</h4>');
+
+        const lines = content.split('\n');
+        let inList = false;
+        const processedLines = [];
+
+        lines.forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('• ') || trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+                if (!inList) {
+                    inList = true;
+                    processedLines.push('<ul class="aml-prompt-list">');
+                }
+                const itemText = trimmed.replace(/^[•\-\*]\s*/, '');
+                processedLines.push(`<li>${itemText}</li>`);
+            } else {
+                if (inList) {
+                    inList = false;
+                    processedLines.push('</ul>');
+                }
+                if (trimmed.length > 0) {
+                    processedLines.push(trimmed);
+                }
+            }
+        });
+        if (inList) {
+            processedLines.push('</ul>');
+        }
+
+        let htmlBody = processedLines.join('<br>');
+        htmlBody = htmlBody.replace(/<\/ul><br>/g, '</ul>');
+        htmlBody = htmlBody.replace(/<\/h4><br>/g, '</h4>');
+
+        const cardHtml = `
+            <div class="aml-card aml-info-card">
+                <div class="aml-card-header">
+                    <span class="aml-badge aml-badge-indigo">📊 INVESTIGATIVE TELEMETRY</span>
+                    <span class="aml-score-tag">Compliance Output</span>
+                </div>
+                <div class="aml-card-body">
+                    ${htmlBody}
+                </div>
+            </div>
+        `;
+        formattedList.push(cardHtml);
+    });
+
+    return formattedList.join('');
+}
+
+function escapeHTML(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 function setDAGState(stateText) {
     const dagState = document.getElementById('dag-execution-state');
     if (dagState) dagState.textContent = stateText;
     
-    // Highlight DAG node elements
     ['node-nlp', 'node-fe', 'node-ml', 'node-risk', 'node-sar'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.classList.add('active-node');
@@ -459,12 +562,28 @@ function appendMessage(sender, text) {
     const div = document.createElement('div');
     div.className = `message ${sender}`;
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    div.innerHTML = `
-        <div class="message-bubble">
-            <div class="message-content">${text}</div>
-            <span class="message-time">${timeStr}</span>
-        </div>
-    `;
+    
+    if (sender === 'user') {
+        div.innerHTML = `
+            <div class="message-bubble">
+                <div class="message-content">${escapeHTML(text)}</div>
+                <span class="message-time">${timeStr}</span>
+            </div>
+            <div class="user-avatar" title="Analyst User">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+        `;
+    } else {
+        div.innerHTML = `
+            <div class="agent-avatar" title="Sentinel Engine">
+                <svg width="14" height="14" viewBox="0 0 32 32" fill="none"><path d="M16 2L4 8V16C4 23.1 9.4 29.7 16 31C22.6 29.7 28 23.1 28 16V8L16 2Z" fill="currentColor"/></svg>
+            </div>
+            <div class="message-bubble">
+                <div class="message-content">${text}</div>
+                <span class="message-time">${timeStr}</span>
+            </div>
+        `;
+    }
     document.getElementById('chat-messages').appendChild(div);
     scrollToBottom();
 }
@@ -632,5 +751,158 @@ async function runStressTest(lower_bound) {
         }
     } catch (e) {
         console.error("Stress test simulation failed", e);
+    }
+}
+
+function setupUploadModal() {
+    const modalOverlay = document.getElementById('upload-modal-overlay');
+    const btnOpen = document.getElementById('btn-open-upload-modal');
+    const btnClose = document.getElementById('btn-close-upload-modal');
+    const btnCancel = document.getElementById('btn-cancel-upload');
+    const uploadForm = document.getElementById('upload-csv-form');
+
+    const dropzoneTx = document.getElementById('dropzone-tx');
+    const fileInputTx = document.getElementById('input-tx-file') || document.getElementById('file-input-tx');
+    const previewTxName = document.getElementById('preview-tx-name');
+
+    const dropzoneCust = document.getElementById('dropzone-cust');
+    const fileInputCust = document.getElementById('input-cust-file') || document.getElementById('file-input-cust');
+    const previewCustName = document.getElementById('preview-cust-name');
+
+    const statusMsg = document.getElementById('upload-status-msg');
+    const btnSubmit = document.getElementById('btn-submit-upload');
+
+    if (!modalOverlay) return;
+
+    // Open Modal
+    if (btnOpen) {
+        btnOpen.addEventListener('click', () => {
+            modalOverlay.classList.add('active');
+            if (statusMsg) {
+                statusMsg.style.display = 'none';
+                statusMsg.textContent = '';
+            }
+        });
+    }
+
+    // Close Modal
+    const closeModal = () => {
+        modalOverlay.classList.remove('active');
+    };
+    if (btnClose) btnClose.addEventListener('click', closeModal);
+    if (btnCancel) btnCancel.addEventListener('click', closeModal);
+    modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) closeModal();
+    });
+
+    // Setup Drag and Drop helper
+    const initDropzone = (dropzone, fileInput, previewEl, defaultText) => {
+        if (!dropzone || !fileInput) return;
+
+        dropzone.addEventListener('click', (e) => {
+            if (e.target === fileInput) return;
+            fileInput.click();
+        });
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.add('dragover');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.remove('dragover');
+            });
+        });
+
+        dropzone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files && files.length > 0) {
+                fileInput.files = files;
+                updatePreview(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files && fileInput.files.length > 0) {
+                updatePreview(fileInput.files[0]);
+            }
+        });
+
+        function updatePreview(file) {
+            if (previewEl) {
+                previewEl.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                previewEl.classList.add('has-file');
+            }
+        }
+    };
+
+    initDropzone(dropzoneTx, fileInputTx, previewTxName, 'transactions.csv');
+    initDropzone(dropzoneCust, fileInputCust, previewCustName, 'customers.csv');
+
+    // Handle Form Submit
+    if (uploadForm) {
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!fileInputTx || !fileInputTx.files || fileInputTx.files.length === 0) {
+                if (statusMsg) {
+                    statusMsg.style.display = 'block';
+                    statusMsg.style.color = '#ef4444';
+                    statusMsg.textContent = 'Please select or drop a valid transactions.csv file.';
+                }
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('transactions_file', fileInputTx.files[0]);
+            if (fileInputCust && fileInputCust.files && fileInputCust.files.length > 0) {
+                formData.append('customers_file', fileInputCust.files[0]);
+            }
+
+            if (statusMsg) {
+                statusMsg.style.display = 'block';
+                statusMsg.style.color = 'var(--accent-light)';
+                statusMsg.textContent = 'Uploading CSV datasets & re-training AML models...';
+            }
+            if (btnSubmit) btnSubmit.disabled = true;
+
+            try {
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    if (statusMsg) {
+                        statusMsg.style.color = '#10b981';
+                        statusMsg.textContent = `Success! ${data.message} (${data.transaction_count} transactions, ${data.flagged_count} flagged).`;
+                    }
+                    setTimeout(() => {
+                        closeModal();
+                        initApp(); // Refresh entire dashboard with new data
+                    }, 1200);
+                } else {
+                    if (statusMsg) {
+                        statusMsg.style.color = '#ef4444';
+                        statusMsg.textContent = `Error: ${data.detail || 'Failed to upload CSV dataset.'}`;
+                    }
+                }
+            } catch (err) {
+                console.error("Upload error", err);
+                if (statusMsg) {
+                    statusMsg.style.color = '#ef4444';
+                    statusMsg.textContent = 'Network or server error uploading dataset.';
+                }
+            } finally {
+                if (btnSubmit) btnSubmit.disabled = false;
+            }
+        });
     }
 }

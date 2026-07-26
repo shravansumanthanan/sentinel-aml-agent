@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2.0.1">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -73,6 +73,11 @@
                 <span class="kpi-label">Latency</span>
                 <span class="kpi-value font-mono" id="kpi-latency">&lt;10 ms</span>
             </div>
+            <div class="kpi-divider"></div>
+            <button class="btn btn-ghost btn-sm" id="btn-open-upload-modal" title="Upload Custom CSV Dataset">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                Upload CSV
+            </button>
             <div class="kpi-divider"></div>
             <button class="btn btn-ghost btn-sm" id="btn-open-audit-drawer" title="View Mathematical Audit Logs">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
@@ -144,9 +149,22 @@
                     </div>
                     <div class="message-bubble">
                         <div class="message-content">
-                            👋 <strong>Welcome to Sentinel AML Workstation.</strong><br>
-                            I parse natural language analyst intent into structured execution contracts, run dual-mode hybrid ML anomaly scoring (XGBoost / IsolationForest), and construct 31 C.F.R. § 1010.311 compliant FinCEN SAR narratives.<br><br>
-                            Select any prompt above or type your query below to launch an investigation.
+                            <div class="aml-card aml-info-card">
+                                <div class="aml-card-header">
+                                    <span class="aml-badge aml-badge-indigo">🛡️ SENTINEL-AML SYSTEM ASSISTANT</span>
+                                    <span class="aml-score-tag">Engine Ready</span>
+                                </div>
+                                <div class="aml-card-body">
+                                    👋 <strong>Welcome to SENTINEL-AML Workstation.</strong><br>
+                                    I parse natural language analyst intent into structured execution contracts, run dual-mode hybrid ML anomaly scoring (XGBoost / IsolationForest), and construct 31 C.F.R. § 1010.311 compliant FinCEN SAR narratives.<br><br>
+                                    <strong><span style="color: var(--accent-light);">💡 Quick Start Guide:</span></strong>
+                                    <ul class="aml-prompt-list">
+                                        <li>Click any preset prompt chip above to execute instant queries</li>
+                                        <li>Type specific customer queries like <code>Is CUST-0014 suspicious?</code></li>
+                                        <li>Query typologies like <code>Find structuring patterns in last 30 days</code></li>
+                                    </ul>
+                                </div>
+                            </div>
                         </div>
                         <span class="message-time">System Ready</span>
                     </div>
@@ -438,6 +456,50 @@ Active Subject Feature Vector:
         </div>
     </aside>
 
-    <script src="/static/app.js"></script>
+    <!-- Upload Custom CSV Modal -->
+    <div class="modal-overlay" id="upload-modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div>
+                    <h3>Upload Custom AML Dataset</h3>
+                    <p class="modal-sub">Ingest transaction & customer CSV files for live feature engineering and ML anomaly scoring.</p>
+                </div>
+                <button class="icon-btn" id="btn-close-upload-modal" title="Close Modal">✕</button>
+            </div>
+            <form id="upload-csv-form" class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Transactions CSV File <span style="color:#ef4444;">* Required</span></label>
+                    <div class="dropzone" id="dropzone-tx">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                        <span class="drop-text">Drag & drop <strong>transactions.csv</strong> or <span class="browse-link">browse</span></span>
+                        <span class="file-name-preview" id="preview-tx-name">No file selected</span>
+                        <input type="file" id="input-tx-file" accept=".csv" required hidden>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Customers CSV File <span style="color:var(--text-3);">(Optional)</span></label>
+                    <div class="dropzone" id="dropzone-cust">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                        <span class="drop-text">Drag & drop <strong>customers.csv</strong> or <span class="browse-link">browse</span></span>
+                        <span class="file-name-preview" id="preview-cust-name">No file selected</span>
+                        <input type="file" id="input-cust-file" accept=".csv" hidden>
+                    </div>
+                </div>
+
+                <div id="upload-status-msg" style="display:none; font-size:0.82rem; padding:0.6rem; border-radius:var(--radius-sm); margin-bottom:1rem;"></div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-ghost" id="btn-cancel-upload">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="btn-submit-upload">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                        Upload & Re-Score Ledger
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=2.0.1"></script>
 </body>
 </html>

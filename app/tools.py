@@ -19,6 +19,7 @@ class EDATool:
         tx_type_dist = df_tx["transaction_type"].value_counts().to_dict()
         channel_dist = df_tx["channel"].value_counts().to_dict()
         risk_dist = df_cust["risk_rating"].value_counts().to_dict() if "risk_rating" in df_cust.columns else {}
+        jurisdiction_vol = df_tx.groupby("country_code")["amount"].sum().round(2).sort_values(ascending=False).head(8).to_dict() if "country_code" in df_tx.columns else {}
         
         top_cust = df_tx.groupby("customer_id")["amount"].agg(["sum", "count"]).reset_index()
         top_cust = top_cust.sort_values(by="sum", ascending=False).head(5).to_dict(orient="records")
@@ -35,7 +36,8 @@ class EDATool:
             "distributions": {
                 "transaction_type": tx_type_dist,
                 "channel": channel_dist,
-                "customer_risk_ratings": risk_dist
+                "customer_risk_ratings": risk_dist,
+                "jurisdiction_volumes": jurisdiction_vol
             },
             "top_volume_customers": top_cust
         }

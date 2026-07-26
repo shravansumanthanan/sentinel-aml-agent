@@ -107,15 +107,20 @@ class NLPIntentParser:
             entities["country_code"] = country_match.group(1).upper()
 
         # 10. Superlatives Detection
-        top_superlatives = ["highest", "top", "max", "most", "largest", "biggest", "worst", "peak", "maximum", "smallest", "minimum", "lowest"]
+        top_superlatives = ["highest", "top", "max", "most", "largest", "biggest", "worst", "peak", "maximum"]
+        min_superlatives = ["smallest", "minimum", "lowest", "least", "min", "bottom"]
         if any(w in query_lower for w in top_superlatives):
             entities["superlative"] = "MAX"
+        elif any(w in query_lower for w in min_superlatives):
+            entities["superlative"] = "MIN"
 
         # 11. Robust Intent Resolution Cascade
         if "help" in query_lower or "what can you do" in query_lower or "capabilities" in query_lower or "command" in query_lower:
             intent = "CAPABILITIES_HELP"
         elif entities["superlative"] == "MAX" and ("risk" in query_lower or "score" in query_lower or "suspicious" in query_lower or "customer" in query_lower or "who" in query_lower or "which" in query_lower):
             intent = "TOP_RISK_SUBJECT"
+        elif entities["superlative"] == "MIN" and ("risk" in query_lower or "score" in query_lower or "suspicious" in query_lower or "customer" in query_lower or "who" in query_lower or "which" in query_lower):
+            intent = "LOWEST_RISK_SUBJECT"
         elif entities["customer_id"] and ("why" in query_lower or "explain" in query_lower or "reason" in query_lower or "factor" in query_lower or "cause" in query_lower):
             intent = "EXPLAIN_RISK_REASON"
         elif entities["customer_id"]:

@@ -1,0 +1,18 @@
+{
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "pythonVersion": "3.14",
+      "extraPaths": [
+        "/Users/sterlingsuman/Desktop/projectx/venv/lib/python3.14/site-packages",
+        "/Users/sterlingsuman/Desktop/projectx"
+      ]
+    }
+  ],
+  "extraPaths": [
+    "/Users/sterlingsuman/Desktop/projectx/venv/lib/python3.14/site-packages",
+    "/Users/sterlingsuman/Desktop/projectx"
+  ],
+  "venvPath": "/Users/sterlingsuman/Desktop/projectx",
+  "venv": "venv"
+}

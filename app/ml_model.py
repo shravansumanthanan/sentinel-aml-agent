@@ -11,6 +11,7 @@ Cache is invalidated automatically when the dataset size changes >10%.
 
 import os
 import json
+import hashlib
 import numpy as np
 import pandas as pd
 import joblib
@@ -72,46 +73,88 @@ class SupervisedAMLClassifier:
         self._scaler_path = os.path.join(model_cache_dir, "aml_scaler.pkl")
         self._meta_path = os.path.join(model_cache_dir, "aml_model_meta.json")
 
-    # ── Cache helpers ───────────────────────────────────────────────────────
+    # ── Cache helpers (Audit Steps 2 & 3) ──────────────────────────────────
 
-    def _has_valid_cache(self, n_samples: int) -> bool:
-        """Return True if a cached supervised model exists for ~same dataset size."""
-        if os.path.exists(self._model_path) and os.path.exists(self._meta_path):
-            try:
-                with open(self._meta_path) as f:
-                    meta = json.load(f)
-                cached_n = meta.get("n_samples", 0)
-                return meta.get("is_supervised", False) and abs(cached_n - n_samples) / max(cached_n, 1) <= 0.10
-            except Exception:
-                pass
-        return False
+    @staticmethod
+    def _compute_data_hash(df: pd.DataFrame, cols: list) -> str:
+        """SHA-256 content hash of the feature matrix for cache invalidation.
+
+        This replaces the old row-count-only check — two datasets with identical
+        sizes but different distributions now correctly invalidate the cache.
+        """
+        raw = df[cols].fillna(0).values.tobytes()
+        return hashlib.sha256(raw).hexdigest()
+
+    def _has_valid_cache(self, data_hash: str) -> bool:
+        """Return True only if ALL cache artefacts exist and the data hash matches."""
+        # Atomic bundle check (Step 3): every piece must be present
+        required = [self._model_path, self._meta_path]
+        if not all(os.path.exists(p) for p in required):
+            return False
+        try:
+            with open(self._meta_path) as f:
+                meta = json.load(f)
+            # Content-hash check (Step 2)
+            if meta.get("data_hash") != data_hash:
+                print(f"⚠️  [ML] Cache data hash mismatch — will retrain.")
+                return False
+            # If supervised, scaler must also exist (Step 3 atomicity)
+            if meta.get("is_supervised") and not os.path.exists(self._scaler_path):
+                print(f"⚠️  [ML] Scaler missing for supervised model — invalidating cache.")
+                return False
+            return True
+        except Exception:
+            return False
 
     def _load_cached(self) -> bool:
-        """Load model artefacts from disk. Returns True on success."""
+        """Load model artefacts from disk. Returns True on success.
+
+        Atomic bundle invariant (Step 3): if ANY artefact fails to load,
+        the entire cache is treated as invalid.
+        """
         try:
             self.model = joblib.load(self._model_path)
-            self.scaler = joblib.load(self._scaler_path) if os.path.exists(self._scaler_path) else None
             with open(self._meta_path) as f:
                 self.model_info = json.load(f)
             self.is_supervised = self.model_info.get("is_supervised", False)
+            # Scaler is required for supervised models (atomic consistency)
+            if self.is_supervised:
+                if not os.path.exists(self._scaler_path):
+                    raise FileNotFoundError("Scaler missing for supervised model")
+                self.scaler = joblib.load(self._scaler_path)
+            else:
+                self.scaler = None
             mtype = self.model_info.get("model_type", "unknown")
             print(f"✅ [ML] Loaded cached {mtype} from {self._model_path}")
             return True
         except Exception as e:
             print(f"⚠️  [ML] Cache load failed ({e}) — will retrain.")
+            self._clear_cache()
             return False
 
     def _save_cache(self):
-        """Persist model artefacts to disk."""
+        """Persist model artefacts to disk as an atomic bundle."""
         try:
             joblib.dump(self.model, self._model_path)
             if self.scaler is not None:
                 joblib.dump(self.scaler, self._scaler_path)
+            elif os.path.exists(self._scaler_path):
+                # Remove stale scaler from a previous supervised run
+                os.remove(self._scaler_path)
             with open(self._meta_path, "w") as f:
                 json.dump(self.model_info, f, indent=2)
             print(f"✅ [ML] Model cached → {self._model_path}")
         except Exception as e:
             print(f"⚠️  [ML] Could not cache model: {e}")
+
+    def _clear_cache(self):
+        """Remove all cache artefacts to force a clean retrain."""
+        for p in [self._model_path, self._scaler_path, self._meta_path]:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
     # ── Training ────────────────────────────────────────────────────────────
 
@@ -131,8 +174,9 @@ class SupervisedAMLClassifier:
         """
         X = df_features[FEATURE_COLS].fillna(0)
         n_samples = len(X)
+        data_hash = self._compute_data_hash(df_features, FEATURE_COLS)
         n_pos = int(labels.sum()) if labels is not None else 0
-        report: Dict[str, Any] = {"n_samples": n_samples}
+        report: Dict[str, Any] = {"n_samples": n_samples, "data_hash": data_hash}
 
         use_supervised = (labels is not None) and (n_pos >= MIN_POSITIVE_SAMPLES)
 
@@ -144,7 +188,10 @@ class SupervisedAMLClassifier:
         self.iso_model.fit(X)
 
         if use_supervised:
-            y = labels.reindex(df_features.index).fillna(0).astype(int).values
+            if "customer_id" in df_features.columns:
+                y = labels.reindex(df_features["customer_id"]).fillna(0).astype(int).values
+            else:
+                y = labels.reindex(df_features.index).fillna(0).astype(int).values
             n_neg = int((y == 0).sum())
             report["n_positive"] = int(y.sum())
             report["n_negative"] = n_neg
@@ -200,6 +247,7 @@ class SupervisedAMLClassifier:
             clf_rep = classification_report(y_te, y_pred, output_dict=True, zero_division=0)
             auc = float(roc_auc_score(y_te, y_prob)) if len(np.unique(y_te)) > 1 else 0.0
 
+            self.is_supervised = True
             report.update({
                 "model_type": model_type,
                 "is_supervised": True,
@@ -210,7 +258,6 @@ class SupervisedAMLClassifier:
                 "f1_score": round(clf_rep.get("1", {}).get("f1-score", 0.0), 4),
                 "feature_importances": self.get_feature_importance(),
             })
-            self.is_supervised = True
             print(
                 f"✅ [ML] {model_type} trained | "
                 f"AUC-ROC={auc:.4f} | F1={report['f1_score']} | "
@@ -294,10 +341,11 @@ class SupervisedAMLClassifier:
         labels: Optional[pd.Series] = None,
     ) -> Dict[str, Any]:
         """
-        Load cached model if the dataset size hasn't changed substantially;
+        Load cached model if the content-hash matches AND all artefacts are present;
         otherwise train from scratch.
         """
-        if self._has_valid_cache(len(df_features)):
+        data_hash = self._compute_data_hash(df_features, FEATURE_COLS)
+        if self._has_valid_cache(data_hash):
             if self._load_cached():
                 return self.model_info
         return self.fit(df_features, labels)

@@ -36,6 +36,20 @@ data/*.csv
 data/
 .agent/
 
+# ML model cache (binary artifacts — never commit)
+data/model_cache/
+*.pkl
+*.joblib
+
+# Secrets & credentials
+*.pem
+*.key
+.env.local
+.env.production
+
+# IDE
+.vscode/
+
 # Mac OS
 .DS_Store
 .AppleDouble
