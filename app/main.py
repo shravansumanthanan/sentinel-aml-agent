@@ -141,11 +141,12 @@ async def upload_dataset_endpoint(
     Ingests custom CSV transaction & customer datasets.
     Re-runs feature engineering, ML anomaly scoring, and risk classification in-memory.
     """
-    if not getattr(transactions_file, 'filename', None) or not transactions_file.filename.endswith('.csv'):
+    tx_name = getattr(transactions_file, "filename", None) or ""
+    if not tx_name.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Transactions file must be a .csv file.")
         
-    valid_cust_file = customers_file if (customers_file and hasattr(customers_file, 'filename') and customers_file.filename) else None
-    if valid_cust_file and not valid_cust_file.filename.endswith('.csv'):
+    cust_name = getattr(customers_file, "filename", None) if customers_file else None
+    if cust_name and not cust_name.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Customers file must be a .csv file.")
 
     try:
@@ -158,9 +159,9 @@ async def upload_dataset_endpoint(
             f.write(content)
 
         # Optional customers CSV
-        if valid_cust_file:
+        if customers_file and cust_name and cust_name.endswith(".csv"):
             cust_dest = os.path.join(DATA_DIR, "customers.csv")
-            cust_content = await valid_cust_file.read()
+            cust_content = await customers_file.read()
             with open(cust_dest, "wb") as f:
                 f.write(cust_content)
 

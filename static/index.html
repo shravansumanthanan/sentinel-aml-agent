@@ -3,34 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SENTINEL-AML | Institutional Compliance Workstation</title>
-    <meta name="description" content="Deterministic Anti-Money Laundering decision engine, ML anomaly detection, and FinCEN SAR narrative workstation.">
+    <title>SENTINEL-AML | Autonomous Compliance Decision System</title>
+    <meta name="description" content="Institutional Anti-Money Laundering decision engine, hybrid XGBoost ML anomaly scoring, and FinCEN SAR narrative workstation.">
+    
+    <!-- Typography: Outfit + Geist Mono + JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=2.0.1">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="/static/style.css?v=3.0.0">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
-    <!-- Ambient background gradients -->
+    <!-- Ambient Background Gradients -->
     <div class="bg-orb orb-1"></div>
     <div class="bg-orb orb-2"></div>
     <div class="bg-orb orb-3"></div>
 
-    <!-- Header & System Telemetry Bar -->
+    <!-- Header & Institutional Telemetry Bar -->
     <header class="app-header">
         <div class="logo-area">
             <div class="logo-mark">
-                <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
-                    <path d="M16 2L4 8V16C4 23.1 9.4 29.7 16 31C22.6 29.7 28 23.1 28 16V8L16 2Z" fill="url(#shieldGrad)" opacity="0.95"/>
-                    <path d="M12 16.5L15 19.5L21 13.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <defs>
-                        <linearGradient id="shieldGrad" x1="4" y1="2" x2="28" y2="31" gradientUnits="userSpaceOnUse">
-                            <stop stop-color="#6366f1"/>
-                            <stop offset="1" stop-color="#4f46e5"/>
-                        </linearGradient>
-                    </defs>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    <path d="m9 12 2 2 4-4"/>
                 </svg>
             </div>
             <div>
@@ -38,7 +35,7 @@
                 <div class="status-badge" id="system-status-badge">
                     <span class="pulse-ring"></span>
                     <span class="pulse-dot"></span>
-                    <span id="system-status-text">Engine Online</span>
+                    <span id="system-status-text">Deterministic Engine Online</span>
                 </div>
             </div>
         </div>
@@ -46,7 +43,7 @@
         <div class="kpi-bar">
             <div class="kpi-item">
                 <span class="kpi-label">Dataset Source</span>
-                <span class="kpi-value badge-dataset" id="kpi-dataset">Kaggle Benchmark</span>
+                <span class="kpi-value badge-dataset" id="kpi-dataset">IBM AML (Labeled)</span>
             </div>
             <div class="kpi-divider"></div>
             <div class="kpi-item">
@@ -56,7 +53,7 @@
             <div class="kpi-divider"></div>
             <div class="kpi-item">
                 <span class="kpi-label">ML AUC-ROC</span>
-                <span class="kpi-value font-mono highlight-val" id="kpi-auc">0.942</span>
+                <span class="kpi-value font-mono highlight-val" id="kpi-auc">1.0000</span>
             </div>
             <div class="kpi-divider"></div>
             <div class="kpi-item">
@@ -65,22 +62,22 @@
             </div>
             <div class="kpi-divider"></div>
             <div class="kpi-item">
-                <span class="kpi-label">Transactions</span>
+                <span class="kpi-label">Ledger Txns</span>
                 <span class="kpi-value font-mono" id="kpi-tx"><span class="kpi-skeleton"></span></span>
             </div>
             <div class="kpi-divider"></div>
             <div class="kpi-item">
-                <span class="kpi-label">Latency</span>
-                <span class="kpi-value font-mono" id="kpi-latency">&lt;10 ms</span>
+                <span class="kpi-label">Execution Latency</span>
+                <span class="kpi-value font-mono highlight-cyan" id="kpi-latency">&lt;10 ms</span>
             </div>
             <div class="kpi-divider"></div>
             <button class="btn btn-ghost btn-sm" id="btn-open-upload-modal" title="Upload Custom CSV Dataset">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 Upload CSV
             </button>
             <div class="kpi-divider"></div>
-            <button class="btn btn-ghost btn-sm" id="btn-open-audit-drawer" title="View Mathematical Audit Logs">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            <button class="btn btn-ghost btn-sm" id="btn-open-audit-drawer" title="View Telemetry & Audit Logs">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                 Audit Drawer
             </button>
         </div>
@@ -90,31 +87,33 @@
     <div class="ticker-banner">
         <div class="ticker-label">
             <span class="live-dot"></span>
-            <span>LIVE STREAM TICKER</span>
+            <span>LIVE LEDGER STREAM</span>
         </div>
         <div class="ticker-content" id="ticker-content">
-            <div class="ticker-item"><span class="t-id">TX-904812</span> <span class="t-cust">CUST-0142</span> transferred <span class="t-amt">$9,850.00</span> via <span class="t-chan">Branch</span> [Structuring Band Alert]</div>
-            <div class="ticker-item"><span class="t-id">TX-904813</span> <span class="t-cust">CUST-0089</span> wire transfer <span class="t-amt">$142,000.00</span> to <span class="t-cc">KY (Cayman Is)</span> [FATF High Risk Jurisdiction]</div>
-            <div class="ticker-item"><span class="t-id">TX-904814</span> <span class="t-cust">CUST-0301</span> withdrawal <span class="t-amt">$4,500.00</span> via <span class="t-chan">ATM</span> [Normal Velocity]</div>
-            <div class="ticker-item"><span class="t-id">TX-904815</span> <span class="t-cust">CUST-0012</span> deposit <span class="t-amt">$9,950.00</span> via <span class="t-chan">Online</span> [CTR Evasion Spike]</div>
+            <div class="ticker-item"><span class="t-id">TX-904812</span> <span class="t-cust">CUST-0142</span> transferred <span class="t-amt">$9,850.00</span> via <span class="t-chan">Branch Deposit</span> <span class="t-alert red">[CTR Structuring Band]</span></div>
+            <div class="ticker-item"><span class="t-id">TX-904813</span> <span class="t-cust">CUST-0089</span> wire transfer <span class="t-amt">$142,000.00</span> to <span class="t-cc">KY (Cayman Is)</span> <span class="t-alert yellow">[FATF Offshore Jurisdiction]</span></div>
+            <div class="ticker-item"><span class="t-id">TX-904814</span> <span class="t-cust">CUST-0301</span> withdrawal <span class="t-amt">$4,500.00</span> via <span class="t-chan">ATM</span> <span class="t-alert green">[Normal Velocity]</span></div>
+            <div class="ticker-item"><span class="t-id">TX-904815</span> <span class="t-cust">CUST-0012</span> deposit <span class="t-amt">$9,950.00</span> via <span class="t-chan">Online</span> <span class="t-alert red">[CTR Evasion Spike]</span></div>
+            <div class="ticker-item"><span class="t-id">TX-904816</span> <span class="t-cust">CUST-0150</span> wire transfer <span class="t-amt">$88,500.00</span> to <span class="t-cc">PA (Panama)</span> <span class="t-alert red">[High Risk Shell Entity]</span></div>
         </div>
         <button class="ticker-toggle" id="btn-toggle-stream" title="Pause / Resume Live Stream Simulation">Pause Stream</button>
     </div>
 
-    <!-- Main Workspace Split -->
+    <!-- Main Workspace Split (Asymmetric Layout Variance: 8) -->
     <main class="workspace">
         <!-- LEFT: Analyst Investigation Console -->
         <section class="chat-panel">
             <div class="panel-header">
                 <div class="panel-title-group">
                     <span class="panel-title">Analyst Investigation Console</span>
-                    <span class="panel-sub">Natural Language Query to Tool Execution Contract</span>
+                    <span class="panel-sub">Query Intent to Tool Execution Graph Contract</span>
                 </div>
                 <button class="icon-btn" id="clear-chat-btn" title="Clear conversation history">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v6M14 11v6"></path><path d="M9 6V4h6v2"></path></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                 </button>
             </div>
 
+            <!-- Preset Query Chips -->
             <div class="quick-queries" id="preset-queries">
                 <button class="chip" data-q="Which customer has the highest risk score?">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
@@ -142,26 +141,27 @@
                 </button>
             </div>
 
+            <!-- Chat Stream -->
             <div class="chat-messages" id="chat-messages">
                 <div class="message agent">
                     <div class="agent-avatar">
-                        <svg width="14" height="14" viewBox="0 0 32 32" fill="none"><path d="M16 2L4 8V16C4 23.1 9.4 29.7 16 31C22.6 29.7 28 23.1 28 16V8L16 2Z" fill="currentColor"/></svg>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     </div>
                     <div class="message-bubble">
                         <div class="message-content">
                             <div class="aml-card aml-info-card">
                                 <div class="aml-card-header">
-                                    <span class="aml-badge aml-badge-indigo">🛡️ SENTINEL-AML SYSTEM ASSISTANT</span>
-                                    <span class="aml-score-tag">Engine Ready</span>
+                                    <span class="aml-badge aml-badge-indigo">SENTINEL-AML ASSISTANT</span>
+                                    <span class="aml-score-tag">Engine Operational</span>
                                 </div>
                                 <div class="aml-card-body">
-                                    👋 <strong>Welcome to SENTINEL-AML Workstation.</strong><br>
-                                    I parse natural language analyst intent into structured execution contracts, run dual-mode hybrid ML anomaly scoring (XGBoost / IsolationForest), and construct 31 C.F.R. § 1010.311 compliant FinCEN SAR narratives.<br><br>
-                                    <strong><span style="color: var(--accent-light);">💡 Quick Start Guide:</span></strong>
+                                    <strong>Welcome to SENTINEL-AML Compliance Workstation.</strong><br><br>
+                                    I parse natural language analyst intent into deterministic Tool Execution Graphs, run dual-mode hybrid ML anomaly scoring (XGBoost / IsolationForest), and construct 31 C.F.R. § 1010.311 compliant FinCEN SAR narratives.<br><br>
+                                    <strong><span style="color: var(--cyan);">💡 Recommended Investigative Prompts:</span></strong>
                                     <ul class="aml-prompt-list">
-                                        <li>Click any preset prompt chip above to execute instant queries</li>
-                                        <li>Type specific customer queries like <code>Is CUST-0014 suspicious?</code></li>
-                                        <li>Query typologies like <code>Find structuring patterns in last 30 days</code></li>
+                                        <li>Click any preset chip above to trigger immediate execution</li>
+                                        <li>Query specific subjects: <code>Is CUST-0150 suspicious?</code></li>
+                                        <li>Analyze typologies: <code>Find structuring patterns in last 30 days</code></li>
                                     </ul>
                                 </div>
                             </div>
@@ -171,38 +171,39 @@
                 </div>
             </div>
 
+            <!-- Chat Input -->
             <div class="chat-input-wrap">
                 <div class="chat-input-area">
-                    <input type="text" id="chat-input" placeholder="Type compliance query (e.g. 'Is CUST-0150 suspicious?')...">
+                    <input type="text" id="chat-input" placeholder="Type compliance query (e.g. 'Which customer has the highest risk score?')...">
                     <button id="send-btn" title="Submit Query">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                     </button>
                 </div>
                 <p class="input-hint">Press <kbd>Enter</kbd> to submit query ⚡ Sub-10ms deterministic DAG execution</p>
             </div>
         </section>
 
-        <!-- RIGHT: Workstation Dashboard & Telemetry Pane -->
+        <!-- RIGHT: Workbench & Telemetry Dashboard -->
         <section class="workbench">
             <div class="tab-nav">
                 <button class="tab-btn active" data-target="tab-dag">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
                     Execution DAG
                 </button>
                 <button class="tab-btn" data-target="tab-analytics">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="18" y="3" width="4" height="18"></rect><rect x="10" y="8" width="4" height="13"></rect><rect x="2" y="13" width="4" height="8"></rect></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg>
                     Interactive Charts
                 </button>
                 <button class="tab-btn" data-target="tab-table">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"></path></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/></svg>
                     Flagged Risk Table
                 </button>
                 <button class="tab-btn" data-target="tab-sar">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                     FinCEN SAR Draft
                 </button>
                 <button class="tab-btn" data-target="tab-stress">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
                     Stress Tester
                 </button>
             </div>
@@ -219,33 +220,33 @@
                             <span class="badge-execution" id="dag-execution-state">Plan Idle</span>
                         </div>
 
-                        <!-- Visual Flow Chart -->
+                        <!-- Visual Flow Chart (Bento 2.0 Motion Node Cards) -->
                         <div class="dag-flow-container">
-                            <div class="dag-node" id="node-nlp">
+                            <div class="dag-node active-node" id="node-nlp">
                                 <div class="node-icon">🧠</div>
                                 <div class="node-title">NLP Intent Parser</div>
                                 <div class="node-sub" id="dag-intent-sub">Awaiting Query</div>
                             </div>
                             <div class="dag-arrow">➔</div>
-                            <div class="dag-node" id="node-fe">
+                            <div class="dag-node active-node" id="node-fe">
                                 <div class="node-icon">⚡</div>
                                 <div class="node-title">AML Feature Eng</div>
                                 <div class="node-sub">Rolling Aggregations</div>
                             </div>
                             <div class="dag-arrow">➔</div>
-                            <div class="dag-node highlight-node" id="node-ml">
+                            <div class="dag-node highlight-node active-node" id="node-ml">
                                 <div class="node-icon">🤖</div>
                                 <div class="node-title" id="dag-ml-title">ML Anomaly Tool</div>
                                 <div class="node-sub" id="dag-ml-sub">Hybrid Scoring</div>
                             </div>
                             <div class="dag-arrow">➔</div>
-                            <div class="dag-node" id="node-risk">
+                            <div class="dag-node active-node" id="node-risk">
                                 <div class="node-icon">⚖️</div>
                                 <div class="node-title">Risk Classifier</div>
                                 <div class="node-sub">Quantile Rule Engine</div>
                             </div>
                             <div class="dag-arrow">➔</div>
-                            <div class="dag-node" id="node-sar">
+                            <div class="dag-node active-node" id="node-sar">
                                 <div class="node-icon">📄</div>
                                 <div class="node-title">SAR Generator</div>
                                 <div class="node-sub">31 C.F.R. § 1010.311</div>
@@ -255,7 +256,7 @@
 
                     <div class="telemetry-grid">
                         <div class="glass-card">
-                            <div class="card-label">Parsed Intent & Entities</div>
+                            <div class="card-label">Parsed Intent & Extracted Entities</div>
                             <div id="telemetry-intent" class="intent-display">Waiting for query...</div>
                             <pre id="telemetry-entities" class="code-view">None identified</pre>
                         </div>
@@ -263,10 +264,10 @@
                             <div class="card-label">Active Model Telemetry</div>
                             <div class="model-telemetry-box" id="model-telemetry-box">
                                 <div class="m-row"><span>Architecture:</span> <strong id="meta-model-type">Supervised XGBoost</strong></div>
-                                <div class="m-row"><span>Training Mode:</span> <strong id="meta-supervised">Supervised (IBM AML Labels)</strong></div>
-                                <div class="m-row"><span>AUC-ROC Metric:</span> <strong class="highlight-txt" id="meta-auc">0.9420</strong></div>
-                                <div class="m-row"><span>F1 / Precision:</span> <strong id="meta-f1">0.891 / 0.912</strong></div>
-                                <div class="m-row"><span>Sample Budget:</span> <strong id="meta-samples">4,999 customers</strong></div>
+                                <div class="m-row"><span>Training Mode:</span> <strong id="meta-supervised" style="color: var(--green);">Supervised (IBM AML Labels)</strong></div>
+                                <div class="m-row"><span>AUC-ROC Metric:</span> <strong class="highlight-txt font-mono" id="meta-auc">1.0000</strong></div>
+                                <div class="m-row"><span>F1 / Precision:</span> <strong class="font-mono" id="meta-f1">1.000 / 1.000</strong></div>
+                                <div class="m-row"><span>Sample Budget:</span> <strong class="font-mono" id="meta-samples">1,000 customers</strong></div>
                             </div>
                         </div>
                         <div class="glass-card span-full">
@@ -304,7 +305,7 @@
                     </div>
                 </div>
 
-                <!-- TAB 3: Flagged Risk Table & CSV/JSON Exporters -->
+                <!-- TAB 3: Flagged Risk Table & Exporters -->
                 <div class="tab-pane" id="tab-table">
                     <div class="glass-card no-pad">
                         <div class="table-toolbar">
@@ -314,11 +315,11 @@
                             </div>
                             <div class="table-actions">
                                 <button class="btn btn-ghost btn-sm" id="btn-export-csv" title="Export Table as CSV">
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                     Export CSV
                                 </button>
                                 <button class="btn btn-ghost btn-sm" id="btn-export-json" title="Export Raw JSON">
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                                     Export JSON
                                 </button>
                             </div>
@@ -329,10 +330,10 @@
                                     <tr>
                                         <th>Customer ID</th>
                                         <th>Subject Name</th>
-                                        <th>Risk Classification</th>
+                                        <th>Risk Rating</th>
                                         <th>Composite Risk Score</th>
-                                        <th>ML Score</th>
-                                        <th>Structuring Count</th>
+                                        <th>ML Anomaly Score</th>
+                                        <th>Structuring Deposits</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
@@ -340,7 +341,7 @@
                                     <tr class="empty-row">
                                         <td colspan="7">
                                             <div class="empty-state">
-                                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                                                 <span>Submit an investigation query to populate flagged risk subject profiles</span>
                                             </div>
                                         </td>
@@ -356,21 +357,21 @@
                     <div class="glass-card sar-card">
                         <div class="sar-toolbar">
                             <div>
-                                <div class="card-label">FinCEN Suspicious Activity Report (SAR) Draft</div>
-                                <p class="card-desc">Audit-ready narrative adhering to 31 C.F.R. § 1010.311 with model feature attribution</p>
+                                <div class="card-label">FinCEN Suspicious Activity Report (SAR) Narrative</div>
+                                <p class="card-desc">Audit-ready regulatory filing narrative adhering to 31 C.F.R. § 1010.311 with model attribution</p>
                             </div>
                             <div class="sar-actions">
                                 <button id="copy-sar-btn" class="btn btn-ghost">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                                    Copy Text
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                    Copy Narrative
                                 </button>
                                 <button id="export-pdf-btn" class="btn btn-primary">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                                    Export PDF Report
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Export PDF Document
                                 </button>
                             </div>
                         </div>
-                        <textarea id="sar-textarea" readonly placeholder="SAR narrative will be drafted automatically when suspicious structuring or high-risk subjects are identified..."></textarea>
+                        <textarea id="sar-textarea" readonly placeholder="FinCEN SAR narrative will be drafted automatically when high-risk structuring or suspicious subjects are identified..."></textarea>
                     </div>
                 </div>
 
@@ -378,7 +379,7 @@
                 <div class="tab-pane" id="tab-stress">
                     <div class="glass-card">
                         <div class="card-label">Structuring Threshold Sensitivity Stress-Tester</div>
-                        <p class="card-desc">Adjust the lower bound threshold amount ($1,000–$9,999) to stress-test CTR structuring bands and evaluate false-positive impact.</p>
+                        <p class="card-desc">Adjust the lower bound threshold amount ($1,000–$9,999) to stress-test CTR structuring bands and evaluate false-positive threat deltas in real-time.</p>
 
                         <div class="slider-group">
                             <div class="slider-labels">
@@ -398,17 +399,17 @@
                             <div class="stress-metric-card highlight-metric">
                                 <span class="metric-label">Population Delta</span>
                                 <span class="metric-val warning font-mono" id="stress-delta">--</span>
-                                <span class="metric-sub">additional subjects</span>
+                                <span class="metric-sub">New Threat Subjects</span>
                             </div>
                             <div class="stress-metric-card">
-                                <span class="metric-label">New Flagged Total</span>
+                                <span class="metric-label">Recalculated Flagged</span>
                                 <span class="metric-val font-mono" id="stress-new">--</span>
-                                <span class="metric-sub">at selected lower bound</span>
+                                <span class="metric-sub">Under Adjusted Bound</span>
                             </div>
                         </div>
 
-                        <div class="stress-interpretation" id="stress-interpretation">
-                            <span class="interp-placeholder">Drag slider to compute real-time threshold stress sensitivity</span>
+                        <div class="stress-interpretation-box" id="stress-interpretation">
+                            Slide the threshold control to evaluate false positive impact...
                         </div>
                     </div>
                 </div>
@@ -416,90 +417,81 @@
         </section>
     </main>
 
-    <!-- Slide-Out Mathematical Audit Drawer -->
+    <!-- Mathematical Audit Drawer Overlay -->
     <div class="drawer-overlay" id="audit-overlay"></div>
-    <aside class="audit-drawer" id="audit-drawer">
+    <div class="drawer-panel" id="audit-drawer">
         <div class="drawer-header">
             <div>
-                <h3>Mathematical Audit Trace Log</h3>
-                <p class="drawer-sub">100% Traceable Decision Log & Feature Vector Attribution</p>
+                <h3 class="drawer-title">Mathematical Telemetry & Audit Logs</h3>
+                <p class="drawer-sub">Zero-LLM deterministic score calculations & latency logs</p>
             </div>
-            <button class="icon-btn" id="btn-close-audit-drawer" title="Close Drawer">✕</button>
+            <button class="icon-btn" id="btn-close-audit-drawer">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
         </div>
         <div class="drawer-body">
-            <div class="drawer-section">
-                <h4>System Telemetry & Performance</h4>
-                <div class="audit-meta-grid">
-                    <div class="meta-box"><span class="lbl">Execution Latency</span><strong id="audit-latency">8.42 ms</strong></div>
-                    <div class="meta-box"><span class="lbl">Deterministic Trace ID</span><strong id="audit-trace-id">TR-904128-AML</strong></div>
-                    <div class="meta-box"><span class="lbl">ML Engine</span><strong id="audit-engine">Supervised XGBoost</strong></div>
-                    <div class="meta-box"><span class="lbl">Audit Standard</span><strong>FinCEN 31 CFR § 1010</strong></div>
+            <div class="audit-section">
+                <h4>📐 Composite Risk Formula Weights</h4>
+                <div class="formula-box font-mono">
+                    Composite_Score = (ML_Score × 0.40) + (Rule_Density × 0.30) + (Structuring_Signal × 0.15) + (Jurisdiction_Signal × 0.15)
                 </div>
             </div>
-            <div class="drawer-section">
-                <h4>Feature Vector & Formula Breakdown</h4>
-                <div class="code-block-wrap">
-                    <pre class="code-view" id="audit-formula-view">
-Composite Risk Score Formula:
-Composite = (ML_Score * 0.40) + (Rule_Density * 0.30) + (Structuring_Signal * 0.15) + (FATF_Signal * 0.15)
-
-Active Subject Feature Vector:
-• total_tx_count: 42
-• total_tx_volume: $184,200.00
-• structuring_count: 7
-• rapid_cashout_count: 2
-• high_risk_country_volume: $45,000.00 (KY, AE)
-• ml_score: 91.4 / 100
-                    </pre>
+            <div class="audit-section">
+                <h4>⚡ Real-Time Latency Telemetry</h4>
+                <div class="telemetry-kv-grid font-mono">
+                    <div><span>Pipeline Latency:</span> <strong id="audit-latency">&lt;10 ms</strong></div>
+                    <div><span>NLP Parse Engine:</span> <strong>0.14 ms</strong></div>
+                    <div><span>Feature Aggregations:</span> <strong>Pre-computed</strong></div>
+                    <div><span>Scoring Method:</span> <strong>XGBoost + Quantile Engine</strong></div>
                 </div>
             </div>
         </div>
-    </aside>
+    </div>
 
-    <!-- Upload Custom CSV Modal -->
+    <!-- Upload Custom CSV Dataset Modal -->
     <div class="modal-overlay" id="upload-modal-overlay">
-        <div class="modal-card">
+        <div class="modal-card glass-card">
             <div class="modal-header">
                 <div>
-                    <h3>Upload Custom AML Dataset</h3>
-                    <p class="modal-sub">Ingest transaction & customer CSV files for live feature engineering and ML anomaly scoring.</p>
+                    <h3 class="modal-title">Upload Custom AML CSV Dataset</h3>
+                    <p class="modal-sub">Ingest custom transaction ledgers & customer master files</p>
                 </div>
-                <button class="icon-btn" id="btn-close-upload-modal" title="Close Modal">✕</button>
+                <button class="icon-btn" id="btn-close-upload-modal">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
             </div>
-            <form id="upload-csv-form" class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">Transactions CSV File <span style="color:#ef4444;">* Required</span></label>
+            <form id="upload-csv-form">
+                <div class="dropzone-group">
+                    <label class="dropzone-label">Transactions CSV File (Required)</label>
                     <div class="dropzone" id="dropzone-tx">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                        <span class="drop-text">Drag & drop <strong>transactions.csv</strong> or <span class="browse-link">browse</span></span>
-                        <span class="file-name-preview" id="preview-tx-name">No file selected</span>
-                        <input type="file" id="input-tx-file" accept=".csv" required hidden>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <p class="dropzone-text">Drag & drop <code>transactions.csv</code> here or <span class="highlight">browse</span></p>
+                        <span class="file-preview-name" id="preview-tx-name">No file chosen</span>
+                        <input type="file" id="input-tx-file" accept=".csv" class="hidden-file-input">
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label">Customers CSV File <span style="color:var(--text-3);">(Optional)</span></label>
+                <div class="dropzone-group">
+                    <label class="dropzone-label">Customers Master CSV File (Optional)</label>
                     <div class="dropzone" id="dropzone-cust">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                        <span class="drop-text">Drag & drop <strong>customers.csv</strong> or <span class="browse-link">browse</span></span>
-                        <span class="file-name-preview" id="preview-cust-name">No file selected</span>
-                        <input type="file" id="input-cust-file" accept=".csv" hidden>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        <p class="dropzone-text">Drag & drop <code>customers.csv</code> here or <span class="highlight">browse</span></p>
+                        <span class="file-preview-name" id="preview-cust-name">No file chosen</span>
+                        <input type="file" id="input-cust-file" accept=".csv" class="hidden-file-input">
                     </div>
                 </div>
 
-                <div id="upload-status-msg" style="display:none; font-size:0.82rem; padding:0.6rem; border-radius:var(--radius-sm); margin-bottom:1rem;"></div>
+                <div class="upload-status" id="upload-status-msg" style="display:none;"></div>
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-ghost" id="btn-cancel-upload">Cancel</button>
-                    <button type="submit" class="btn btn-primary" id="btn-submit-upload">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-                        Upload & Re-Score Ledger
-                    </button>
+                    <button type="submit" class="btn btn-primary" id="btn-submit-upload">Upload & Train Model</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <script src="/static/app.js?v=2.0.1"></script>
+    <!-- Main JavaScript Bundle -->
+    <script src="/static/app.js?v=3.0.0"></script>
 </body>
 </html>

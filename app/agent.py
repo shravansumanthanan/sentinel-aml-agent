@@ -154,14 +154,6 @@ class AMLAgentOrchestrator:
                 "2. Introduce SENTINEL-AML financial intelligence assistant and investigative capabilities"
             ]
             top_cid = html.escape(self._get_top_suspicious_customer_id())
-        if intent == "GREETING":
-            tools_invoked_live.append("GreetingResponseTool")
-            tools_skipped.extend([ml_tool_name, "SARGeneratorTool"])
-            execution_plan = [
-                "1. Understand analyst greeting and query intent",
-                "2. Introduce SENTINEL-AML financial intelligence assistant and investigative capabilities"
-            ]
-            top_cid = html.escape(self._get_top_suspicious_customer_id())
             exp = (
                 "<div class='aml-card aml-info-card'>"
                 "<div class='aml-card-header'>"

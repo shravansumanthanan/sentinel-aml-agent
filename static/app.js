@@ -882,7 +882,9 @@ function setupUploadModal() {
                 if (res.ok) {
                     if (statusMsg) {
                         statusMsg.style.color = '#10b981';
-                        statusMsg.textContent = `Success! ${data.message} (${data.transaction_count} transactions, ${data.flagged_count} flagged).`;
+                        const txCount = (data.total_transactions || 0).toLocaleString();
+                        const custCount = (data.unique_customers || 0).toLocaleString();
+                        statusMsg.textContent = `Success! ${data.message} (${txCount} transactions, ${custCount} customers processed).`;
                     }
                     setTimeout(() => {
                         closeModal();
