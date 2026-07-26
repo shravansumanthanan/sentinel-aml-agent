@@ -208,6 +208,109 @@ class AMLAgentOrchestrator:
                 "</div>"
                 "</div>"
             )
+        elif intent == "SAR_GENERATION":
+            raw_cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
+            match_result = self._find_closest_customer_id(raw_cid, entities.get("raw_cust_num"))
+            cid = match_result["resolved_id"] or raw_cid
+
+            execution_plan = [
+                f"1. Target subject profile: {cid}",
+                "2. Extract transaction ledger and risk indicators for subject",
+                "3. Generate formal regulatory FinCEN Suspicious Activity Report (SAR) narrative"
+            ]
+            lookup_data = self.single_lookup_tool.run(cid, self.df_transactions, self.df_customers, self.df_classified)
+            tools_invoked_live.append("SingleEntityLookupTool")
+            output_payload["results"]["single_lookup"] = lookup_data
+
+            if lookup_data.get("found"):
+                sar_text = self.sar_tool.generate_sar(
+                    cid, lookup_data["customer"], lookup_data["risk_profile"], lookup_data["transaction_history"], model_info=self.model_info
+                )
+                output_payload["sar_narrative"] = sar_text
+                tools_invoked_live.append("SARGeneratorTool")
+
+                safe_cid = html.escape(str(cid))
+                exp = (
+                    f"<div class='aml-card aml-risk-card'>"
+                    f"<div class='aml-card-header'>"
+                    f"<span class='aml-badge aml-badge-red'>📝 FinCEN SAR NARRATIVE GENERATED</span>"
+                    f"<span class='aml-score-tag'>Subject: <strong>{safe_cid}</strong></span>"
+                    f"</div>"
+                    f"<div class='aml-card-body'>"
+                    f"Generated regulatory Suspicious Activity Report narrative for subject <strong>{safe_cid}</strong>.<br><br>"
+                    f"Review the narrative content below and in the <strong>FinCEN SAR Narrative Panel</strong>."
+                    f"</div>"
+                    f"</div>"
+                )
+                output_payload["explanations"].append(exp)
+            else:
+                safe_raw = html.escape(str(raw_cid))
+                exp = (
+                    f"<div class='aml-card aml-info-card'>"
+                    f"<div class='aml-card-header'>"
+                    f"<span class='aml-badge aml-badge-yellow'>⚠️ SUBJECT NOT FOUND</span>"
+                    f"</div>"
+                    f"<div class='aml-card-body'>"
+                    f"Unable to generate SAR narrative for subject <strong>{safe_raw}</strong> — not found in active ledger."
+                    f"</div>"
+                    f"</div>"
+                )
+                output_payload["explanations"].append(exp)
+
+        elif intent == "STRESS_TEST":
+            bound = entities.get("stress_bound") or entities.get("min_amount") or entities.get("max_amount") or 9000.0
+            execution_plan = [
+                f"1. Configure structuring lower bound threshold to ${bound:,.2f}",
+                "2. Recalculate customer structuring frequencies and population delta",
+                "3. Quantify false positive impact and newly flagged suspicious subjects"
+            ]
+            res = self.stress_test_threshold(lower_bound=bound)
+            output_payload["results"]["stress_test"] = res
+            tools_invoked_live.append("ThresholdStressTestTool")
+
+            exp = (
+                f"<div class='aml-card aml-info-card'>"
+                f"<div class='aml-card-header'>"
+                f"<span class='aml-badge aml-badge-yellow'>⚡ STRUCTURING THRESHOLD STRESS TEST</span>"
+                f"<span class='aml-score-tag'>Bound: <strong>${bound:,.2f}</strong></span>"
+                f"</div>"
+                f"<div class='aml-card-body'>"
+                f"{html.escape(res['interpretation'])}<br><br>"
+                f"<div class='aml-stats-grid'>"
+                f"<div class='aml-stat-box'><span class='aml-stat-lbl'>Baseline Flagged</span><span class='aml-stat-val'>{res['baseline_flagged_customers']}</span></div>"
+                f"<div class='aml-stat-box'><span class='aml-stat-lbl'>New Flagged</span><span class='aml-stat-val val-red'>{res['new_flagged_customers']}</span></div>"
+                f"<div class='aml-stat-box'><span class='aml-stat-lbl'>Net Delta</span><span class='aml-stat-val'>+{res['customer_count_delta']}</span></div>"
+                f"</div>"
+                f"</div>"
+                f"</div>"
+            )
+            output_payload["explanations"].append(exp)
+
+        elif intent == "VELOCITY_SEARCH":
+            tools_skipped.extend(["EDATool", "SingleEntityLookupTool", "ThresholdStressTestTool"])
+            execution_plan = [
+                "1. Scan ledger for rapid cash-out activity (withdrawals immediately following deposit)",
+                "2. Measure time elapsed between incoming wire/deposit and outgoing cash withdrawal",
+                "3. Rank subjects exhibiting rapid cash-out velocity red flags"
+            ]
+            flagged = self.df_classified[self.df_classified["rapid_cashout_count"] > 0].sort_values(by="composite_risk_score", ascending=False)
+            if flagged.empty:
+                flagged = self.df_classified.sort_values(by="composite_risk_score", ascending=False).head(10)
+            merged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
+            output_payload["results"]["flagged_table"] = self._clean_records(merged)
+
+            exp = (
+                f"<div class='aml-card aml-risk-card'>"
+                f"<div class='aml-card-header'>"
+                f"<span class='aml-badge aml-badge-red'>⚡ RAPID CASHOUT VELOCITY ALERT</span>"
+                f"<span class='aml-score-tag'>Flagged: <strong>{len(flagged)} Subjects</strong></span>"
+                f"</div>"
+                f"<div class='aml-card-body'>"
+                f"Identified <strong>{len(flagged)} subjects</strong> exhibiting rapid cash-out velocity (incoming funds withdrawn within 2 hours).<br><br>"
+                f"Review flagged subjects in the <strong>Flagged Risk Table</strong> tab."
+                f"</div>"
+                f"</div>"
+            )
             output_payload["explanations"].append(exp)
 
         elif intent == "TOP_RISK_SUBJECT":

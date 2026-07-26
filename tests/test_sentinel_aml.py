@@ -73,6 +73,9 @@ class TestSentinelAMLNLPParsing(unittest.TestCase):
             ("Which countries?", "JURISDICTION_ANALYSIS", {}),
             ("Which jurisdictions?", "JURISDICTION_ANALYSIS", {}),
             ("Which customer has the lowest risk score?", "LOWEST_RISK_SUBJECT", {}),
+            ("generate SAR for user 12", "SAR_GENERATION", {"customer_id": "CUST-0012"}),
+            ("run stress test at $9500", "STRESS_TEST", {"stress_bound": 9500.0}),
+            ("rapid cash out velocity alerts in past month", "VELOCITY_SEARCH", {"pattern_type": "RAPID_CASHOUT", "time_window_days": 30}),
         ]
         for query, expected_intent, expected_entities in cases:
             with self.subTest(query=query):
