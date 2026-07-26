@@ -310,10 +310,14 @@
                     <div class="glass-card no-pad">
                         <div class="table-toolbar">
                             <div>
-                                <span class="card-label" style="margin:0">Flagged Risk Subjects & Anomaly Records</span>
-                                <span class="table-count font-mono" id="table-count">0 subjects</span>
+                                <span class="card-label" style="margin:0" id="table-view-title">Flagged Risk Subjects & Anomaly Records</span>
+                                <span class="table-count font-mono" id="table-count">0 items</span>
                             </div>
                             <div class="table-actions">
+                                <div class="btn-group" id="table-toggle-group" style="display:inline-flex; background:rgba(255,255,255,0.05); padding:2px; border-radius:8px; border:1px solid var(--border); margin-right:8px;">
+                                    <button class="btn btn-ghost btn-sm active" id="btn-show-customers" style="padding:0.25rem 0.6rem; font-size:0.75rem;">👤 Customers (<span id="count-cust-badge">0</span>)</button>
+                                    <button class="btn btn-ghost btn-sm" id="btn-show-txs" style="padding:0.25rem 0.6rem; font-size:0.75rem;">💳 Suspicious Txns (<span id="count-tx-badge">0</span>)</button>
+                                </div>
                                 <button class="btn btn-ghost btn-sm" id="btn-export-csv" title="Export Table as CSV">
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                     Export CSV
@@ -327,22 +331,23 @@
                         <div class="table-scroll">
                             <table id="flagged-table">
                                 <thead>
-                                    <tr>
+                                    <tr id="table-head-row">
                                         <th>Customer ID</th>
                                         <th>Subject Name</th>
-                                        <th>Risk Rating</th>
-                                        <th>Composite Risk Score</th>
-                                        <th>ML Anomaly Score</th>
-                                        <th>Structuring Deposits</th>
+                                        <th>Risk Level</th>
+                                        <th>Composite Score</th>
+                                        <th>ML Anomaly</th>
+                                        <th>Structuring Txns</th>
+                                        <th>Suggested Escalation</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <tr class="empty-row">
-                                        <td colspan="7">
+                                        <td colspan="8">
                                             <div class="empty-state">
                                                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                                                <span>Submit an investigation query to populate flagged risk subject profiles</span>
+                                                <span>Submit an investigation query to populate flagged risk subject profiles and top suspicious transactions</span>
                                             </div>
                                         </td>
                                     </tr>

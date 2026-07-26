@@ -187,7 +187,7 @@ class RiskClassifierTool:
             if score >= p75 or row["rule_hits_count"] >= 2:
                 return "HIGH", "REPORT (File FinCEN SAR)"
             elif score > p40 or row["structuring_count"] >= 1 or row["rule_high_risk_country"]:
-                return "MEDIUM", "FLAG FOR REVIEW (Senior Analyst)"
+                return "MEDIUM", "REVIEW (Enhanced Due Diligence)"
             else:
                 return "LOW", "MONITOR (Routine Check)"
 

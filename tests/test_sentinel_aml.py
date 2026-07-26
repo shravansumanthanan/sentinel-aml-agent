@@ -274,6 +274,38 @@ class TestAIRegressionGuard(unittest.TestCase):
         called = res["telemetry"]["tools_called"]
         self.assertEqual(len(called), len(set(called)), "tools_called list must contain unique tool entries")
 
+    def test_ai_regression_execution_summary_and_top_transactions(self):
+        """Ensures execution_summary and top_transactions are generated correctly for compliance requirements."""
+        req = ChatRequest(query="Find structuring patterns in the last 30 days")
+        res = chat_endpoint(req)
+
+        # 1. Query-Aware Execution Summary contract
+        self.assertIn("execution_summary", res)
+        summary = res["execution_summary"]
+        self.assertIn("user_request", summary)
+        self.assertIn("parsed_intent", summary)
+        self.assertIn("filters_detected", summary)
+        self.assertIn("tools_invoked", summary)
+        self.assertEqual(summary["user_request"], "Find structuring patterns in the last 30 days")
+
+        # 2. Top suspicious transactions contract
+        self.assertIn("top_transactions", res["results"])
+        top_txs = res["results"]["top_transactions"]
+        self.assertIsInstance(top_txs, list)
+        if top_txs:
+            first_tx = top_txs[0]
+            self.assertIn("transaction_id", first_tx)
+            self.assertIn("risk_level", first_tx)
+            self.assertIn("aml_pattern", first_tx)
+            self.assertIn("suggested_action", first_tx)
+
+        # 3. Flagged table escalation action contract
+        flagged = res["results"].get("flagged_table", [])
+        if flagged:
+            first_cust = flagged[0]
+            self.assertIn("risk_level", first_cust)
+            self.assertIn("recommended_action", first_cust)
+
 
 if __name__ == "__main__":
     unittest.main()

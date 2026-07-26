@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
 let charts = {};
 let tickerPaused = false;
 let activeTableData = [];
+let activeTransactionsData = [];
+let currentTableView = 'customers'; // 'customers' | 'transactions'
 
 async function initApp() {
     try {
@@ -327,6 +329,24 @@ function setupEventListeners() {
         });
     }
 
+    // Customers / Transactions View Toggle
+    const btnCust = document.getElementById('btn-show-customers');
+    const btnTxs = document.getElementById('btn-show-txs');
+    if (btnCust && btnTxs) {
+        btnCust.addEventListener('click', () => {
+            currentTableView = 'customers';
+            btnCust.classList.add('active');
+            btnTxs.classList.remove('active');
+            renderTableView();
+        });
+        btnTxs.addEventListener('click', () => {
+            currentTableView = 'transactions';
+            btnTxs.classList.add('active');
+            btnCust.classList.remove('active');
+            renderTableView();
+        });
+    }
+
     // CSV & JSON Table Exporters
     const btnCsv = document.getElementById('btn-export-csv');
     if (btnCsv) {
@@ -619,14 +639,14 @@ function updateWorkbench(data) {
         const planContainer = document.getElementById('telemetry-plan');
         if (planContainer) {
             planContainer.innerHTML = (data.telemetry.execution_plan || []).map(step => 
-                `<div class="plan-step"><svg class="step-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>${step}</div>`
+                `<div class="plan-step"><svg class="step-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>${escapeHTML(step)}</div>`
             ).join('');
         }
         
         const toolsContainer = document.getElementById('telemetry-tools');
         if (toolsContainer) {
-            const called = (data.telemetry.tools_called || []).map(t => `<span class="pill low" style="display:inline-block; margin-right:4px; margin-bottom:4px;">${t}</span>`).join('');
-            const skipped = (data.telemetry.tools_skipped || []).map(t => `<span class="pill" style="display:inline-block; background:rgba(255,255,255,0.05); color:var(--text-3); margin-right:4px; margin-bottom:4px;">${t}</span>`).join('');
+            const called = (data.telemetry.tools_called || []).map(t => `<span class="pill low" style="display:inline-block; margin-right:4px; margin-bottom:4px;">${escapeHTML(t)}</span>`).join('');
+            const skipped = (data.telemetry.tools_skipped || []).map(t => `<span class="pill" style="display:inline-block; background:rgba(255,255,255,0.05); color:var(--text-3); margin-right:4px; margin-bottom:4px;">${escapeHTML(t)}</span>`).join('');
             toolsContainer.innerHTML = `
                 <div style="margin-bottom: 0.75rem;"><strong>Invoked Node Tools:</strong><div style="margin-top: 4px;">${called}</div></div>
                 <div><strong>Skipped Tools:</strong><div style="margin-top: 4px;">${skipped}</div></div>
@@ -646,49 +666,149 @@ function updateWorkbench(data) {
         if (sarEl) sarEl.value = data.sar_narrative;
     }
 
-    if (data.results && data.results.flagged_table) {
-        activeTableData = data.results.flagged_table;
-        const countEl = document.getElementById('table-count');
-        if (countEl) countEl.textContent = `${activeTableData.length} subjects`;
+    if (data.results) {
+        activeTableData = data.results.flagged_table || [];
+        activeTransactionsData = data.results.top_transactions || [];
+        renderTableView();
 
-        const tbody = document.querySelector('#flagged-table tbody');
-        if (tbody) {
-            tbody.innerHTML = activeTableData.map(row => {
-                const riskClass = (row.risk_level || 'low').toLowerCase();
-                const displayName = row.customer_name || row.customer_id || '—';
-                const mlScore = (row.ml_score != null) ? Number(row.ml_score).toFixed(1) : '—';
-                const compositeScore = (row.composite_risk_score != null) ? Number(row.composite_risk_score).toFixed(1) : '—';
-                
-                return `
-                    <tr>
-                        <td><code style="font-family: var(--mono); color: var(--text-1);">${row.customer_id}</code></td>
-                        <td style="font-weight: 500;">${displayName}</td>
-                        <td><span class="pill ${riskClass}">${row.risk_level || 'LOW'}</span></td>
-                        <td><span style="font-family: var(--mono); color: var(--accent-light); font-weight:700;">${compositeScore} / 100</span></td>
-                        <td><span style="font-family: var(--mono); color: var(--green);">${mlScore}</span></td>
-                        <td>${row.structuring_count ?? 0}</td>
-                        <td>
-                            <button class="btn btn-ghost btn-sm inspect-btn" data-cid="${row.customer_id}" style="padding: 0.25rem 0.6rem; font-size: 0.72rem;">Inspect Profile</button>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
-            
-            tbody.querySelectorAll('.inspect-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const input = document.getElementById('chat-input');
-                    if (input) {
-                        input.value = `Explain risk for customer ${btn.dataset.cid}`;
-                        submitQuery();
-                    }
-                });
-            });
+        if (activeTableData.length > 0 || activeTransactionsData.length > 0) {
+            switchTab('tab-table');
+        } else if (data.sar_narrative) {
+            switchTab('tab-sar');
+        } else {
+            switchTab('tab-dag');
         }
-        switchTab('tab-table');
-    } else if (data.sar_narrative) {
-        switchTab('tab-sar');
+    }
+}
+
+function renderTableView() {
+    const titleEl = document.getElementById('table-view-title');
+    const countEl = document.getElementById('table-count');
+    const theadRow = document.getElementById('table-head-row');
+    const tbody = document.querySelector('#flagged-table tbody');
+    if (!tbody || !theadRow) return;
+
+    const countCust = activeTableData ? activeTableData.length : 0;
+    const countTx = activeTransactionsData ? activeTransactionsData.length : 0;
+
+    const badgeCust = document.getElementById('count-cust-badge');
+    if (badgeCust) badgeCust.textContent = countCust;
+    const badgeTx = document.getElementById('count-tx-badge');
+    if (badgeTx) badgeTx.textContent = countTx;
+
+    if (currentTableView === 'customers') {
+        if (titleEl) titleEl.textContent = 'Flagged Risk Subjects & Customer Profiles';
+        if (countEl) countEl.textContent = `${countCust} subjects`;
+
+        theadRow.innerHTML = `
+            <th>Customer ID</th>
+            <th>Subject Name</th>
+            <th>Risk Level</th>
+            <th>Composite Score</th>
+            <th>ML Anomaly</th>
+            <th>Structuring Txns</th>
+            <th>Suggested Escalation</th>
+            <th>Actions</th>
+        `;
+
+        if (countCust === 0) {
+            tbody.innerHTML = `
+                <tr class="empty-row">
+                    <td colspan="8">
+                        <div class="empty-state">
+                            <span>Submit an investigation query to populate flagged customer profiles</span>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = activeTableData.map(row => {
+            const riskClass = (row.risk_level || 'low').toLowerCase();
+            const displayName = row.customer_name || row.customer_id || '—';
+            const mlScore = (row.ml_score != null) ? Number(row.ml_score).toFixed(1) : '—';
+            const compositeScore = (row.composite_risk_score != null) ? Number(row.composite_risk_score).toFixed(1) : '—';
+            const action = row.recommended_action || row.suggested_action || 'MONITOR (Routine Check)';
+            
+            return `
+                <tr>
+                    <td><code style="font-family: var(--mono); color: var(--text-1);">${escapeHTML(row.customer_id)}</code></td>
+                    <td style="font-weight: 500;">${escapeHTML(displayName)}</td>
+                    <td><span class="pill ${riskClass}">${escapeHTML(row.risk_level || 'LOW')}</span></td>
+                    <td><span style="font-family: var(--mono); color: var(--accent-light); font-weight:700;">${compositeScore} / 100</span></td>
+                    <td><span style="font-family: var(--mono); color: var(--green);">${mlScore}</span></td>
+                    <td>${row.structuring_count ?? 0}</td>
+                    <td><span style="font-size: 0.78rem; font-weight: 600; color: var(--text-1);">${escapeHTML(action)}</span></td>
+                    <td>
+                        <button class="btn btn-ghost btn-sm inspect-btn" data-cid="${escapeHTML(row.customer_id)}" style="padding: 0.25rem 0.6rem; font-size: 0.72rem;">Inspect Profile</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        tbody.querySelectorAll('.inspect-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const input = document.getElementById('chat-input');
+                if (input) {
+                    input.value = `Explain risk for customer ${btn.dataset.cid}`;
+                    submitQuery();
+                }
+            });
+        });
+
     } else {
-        switchTab('tab-dag');
+        if (titleEl) titleEl.textContent = 'Top Suspicious Transactions (Selected Analysis Path)';
+        if (countEl) countEl.textContent = `${countTx} transactions`;
+
+        theadRow.innerHTML = `
+            <th>Tx ID</th>
+            <th>Customer ID</th>
+            <th>Subject Name</th>
+            <th>Amount</th>
+            <th>Type</th>
+            <th>Channel</th>
+            <th>Country</th>
+            <th>Risk Level</th>
+            <th>Detected AML Pattern</th>
+            <th>Suggested Escalation</th>
+        `;
+
+        if (countTx === 0) {
+            tbody.innerHTML = `
+                <tr class="empty-row">
+                    <td colspan="10">
+                        <div class="empty-state">
+                            <span>No top suspicious transaction records extracted for this query path</span>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = activeTransactionsData.map(tx => {
+            const riskClass = (tx.risk_level || 'low').toLowerCase();
+            const displayName = tx.customer_name || tx.customer_id || '—';
+            const amt = (tx.amount != null) ? '$' + Number(tx.amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '$0.00';
+            const pattern = tx.aml_pattern || 'Anomalous Activity';
+            const action = tx.suggested_action || 'REVIEW (Enhanced Due Diligence)';
+
+            return `
+                <tr>
+                    <td><code style="font-family: var(--mono); color: var(--cyan);">${escapeHTML(tx.transaction_id || '—')}</code></td>
+                    <td><code style="font-family: var(--mono); color: var(--text-1);">${escapeHTML(tx.customer_id || '—')}</code></td>
+                    <td style="font-weight: 500;">${escapeHTML(displayName)}</td>
+                    <td><span style="font-family: var(--mono); font-weight:700; color: #f8fafc;">${amt}</span></td>
+                    <td>${escapeHTML(tx.transaction_type || '—')}</td>
+                    <td>${escapeHTML(tx.channel || '—')}</td>
+                    <td><span class="font-mono">${escapeHTML(tx.country_code || 'US')}</span></td>
+                    <td><span class="pill ${riskClass}">${escapeHTML(tx.risk_level || 'LOW')}</span></td>
+                    <td><span style="color: var(--amber); font-size: 0.78rem; font-weight: 500;">${escapeHTML(pattern)}</span></td>
+                    <td><span style="font-size: 0.78rem; font-weight: 600;">${escapeHTML(action)}</span></td>
+                </tr>
+            `;
+        }).join('');
     }
 }
 
@@ -704,34 +824,40 @@ function switchTab(tabId) {
 }
 
 function exportTableCSV() {
-    if (!activeTableData || activeTableData.length === 0) {
-        alert('No risk table data available to export. Run a query first.');
+    const dataToExport = currentTableView === 'customers' ? activeTableData : activeTransactionsData;
+    const filename = currentTableView === 'customers' ? 'sentinel_flagged_risk_subjects.csv' : 'sentinel_suspicious_transactions.csv';
+
+    if (!dataToExport || dataToExport.length === 0) {
+        alert('No data available to export in current view. Run a query first.');
         return;
     }
-    const headers = Object.keys(activeTableData[0]);
+    const headers = Object.keys(dataToExport[0]);
     const csvRows = [
         headers.join(','),
-        ...activeTableData.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(','))
+        ...dataToExport.map(row => headers.map(h => JSON.stringify(row[h] ?? '')).join(','))
     ];
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sentinel_flagged_risk_subjects.csv';
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
 }
 
 function exportTableJSON() {
-    if (!activeTableData || activeTableData.length === 0) {
-        alert('No risk table data available to export. Run a query first.');
+    const dataToExport = currentTableView === 'customers' ? activeTableData : activeTransactionsData;
+    const filename = currentTableView === 'customers' ? 'sentinel_audit_customers.json' : 'sentinel_audit_transactions.json';
+
+    if (!dataToExport || dataToExport.length === 0) {
+        alert('No data available to export in current view. Run a query first.');
         return;
     }
-    const blob = new Blob([JSON.stringify(activeTableData, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sentinel_audit_export.json';
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
 }

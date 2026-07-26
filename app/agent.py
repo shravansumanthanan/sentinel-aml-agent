@@ -129,6 +129,59 @@ class AMLAgentOrchestrator:
         df_clean[num_cols] = df_clean[num_cols].fillna(0)
         return df_clean.to_dict(orient="records")
 
+    def _get_top_transactions_for_flagged(
+        self,
+        df_tx: pd.DataFrame,
+        df_classified_subset: pd.DataFrame,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Extracts top suspicious individual transaction records corresponding to flagged subjects/path.
+        Enriches transactions with risk levels, risk scores, detected AML patterns, and suggested escalation actions.
+        """
+        if df_classified_subset.empty or df_tx.empty:
+            return []
+
+        cust_risk_map = dict(zip(df_classified_subset["customer_id"], df_classified_subset["risk_level"])) if "risk_level" in df_classified_subset.columns else {}
+        cust_score_map = dict(zip(df_classified_subset["customer_id"], df_classified_subset["composite_risk_score"])) if "composite_risk_score" in df_classified_subset.columns else {}
+        cust_action_map = dict(zip(df_classified_subset["customer_id"], df_classified_subset["recommended_action"])) if "recommended_action" in df_classified_subset.columns else {}
+        cust_name_map = dict(zip(self.df_customers["customer_id"], self.df_customers["customer_name"])) if "customer_name" in self.df_customers.columns else {}
+
+        flagged_cids = set(df_classified_subset["customer_id"])
+        tx_sub = df_tx[df_tx["customer_id"].isin(flagged_cids)].copy()
+
+        if tx_sub.empty:
+            return []
+
+        ctr_limit = 10000.0
+        lower_struct = ctr_limit * 0.90
+        upper_struct = ctr_limit * 0.999
+
+        def annotate_tx_pattern(row):
+            amt = float(row.get("amount", 0.0))
+            cc = str(row.get("country_code", "US"))
+            ttype = str(row.get("transaction_type", "")).lower()
+
+            if lower_struct <= amt <= upper_struct:
+                return "CTR Structuring Band Evasion"
+            elif cc in HIGH_RISK_JURISDICTIONS:
+                return f"FATF High-Risk Offshore ({cc})"
+            elif "cash" in ttype or ttype in ["withdrawal", "deposit"]:
+                return "Rapid Cash Movement / Velocity"
+            elif amt >= 50000.0:
+                return "High-Value Transfer Spike"
+            else:
+                return "Anomalous Transaction Baseline"
+
+        tx_sub["aml_pattern"] = tx_sub.apply(annotate_tx_pattern, axis=1)
+        tx_sub["risk_level"] = tx_sub["customer_id"].map(cust_risk_map).fillna("LOW")
+        tx_sub["composite_risk_score"] = tx_sub["customer_id"].map(cust_score_map).fillna(0.0)
+        tx_sub["suggested_action"] = tx_sub["customer_id"].map(cust_action_map).fillna("MONITOR (Routine Check)")
+        tx_sub["customer_name"] = tx_sub["customer_id"].map(cust_name_map).fillna(tx_sub["customer_id"])
+
+        tx_sorted = tx_sub.sort_values(by=["composite_risk_score", "amount"], ascending=[False, False]).head(limit)
+        return self._clean_records(tx_sorted)
+
     def _get_windowed_data(
         self,
         time_window_days: Optional[int] = None,
@@ -1358,18 +1411,67 @@ class AMLAgentOrchestrator:
             exp_str = f"Identified <strong>{len(high_risk)} suspicious subjects</strong> whose activity looks unusual compared to baseline norms.{top_info}"
             output_payload["explanations"].append(exp_str)
 
+        # Extract top suspicious transactions for the selected analysis path (Item 2 & 6)
+        if "flagged_table" in output_payload["results"] and output_payload["results"]["flagged_table"]:
+            df_flagged_cust = pd.DataFrame(output_payload["results"]["flagged_table"])
+            tx_win_ref = df_tx_win if 'df_tx_win' in locals() else self.df_transactions
+            output_payload["results"]["top_transactions"] = self._get_top_transactions_for_flagged(
+                tx_win_ref, df_flagged_cust, limit=20
+            )
+        elif "single_lookup" in output_payload["results"] and output_payload["results"]["single_lookup"].get("found"):
+            tx_hist = output_payload["results"]["single_lookup"].get("transaction_history", [])
+            df_single_tx = pd.DataFrame(tx_hist)
+            df_single_cust = pd.DataFrame([output_payload["results"]["single_lookup"]["risk_profile"]])
+            output_payload["results"]["top_transactions"] = self._get_top_transactions_for_flagged(
+                df_single_tx, df_single_cust, limit=20
+            )
+        else:
+            output_payload["results"]["top_transactions"] = []
+
         output_payload["direct_answer"] = self._synthesize_direct_answer(intent, entities, output_payload)
 
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        all_tools_called = list(dict.fromkeys(tools_precomputed + tools_invoked_live))
 
         output_payload["telemetry"] = {
             "execution_plan": execution_plan,
-            "tools_called": list(dict.fromkeys(tools_precomputed + tools_invoked_live)),
+            "tools_called": all_tools_called,
             "tools_precomputed": tools_precomputed,
             "tools_invoked_live": tools_invoked_live,
             "tools_skipped": tools_skipped,
             "latency_ms": elapsed_ms
         }
+
+        # Item 1: Query-Aware Execution Summary payload & HTML Card
+        output_payload["execution_summary"] = {
+            "user_request": query,
+            "parsed_intent": intent,
+            "filters_detected": entities,
+            "tools_invoked": all_tools_called,
+            "tools_skipped": tools_skipped,
+            "latency_ms": elapsed_ms
+        }
+
+        # Format Query-Aware Execution Summary HTML Card
+        entities_str = ", ".join([f"<code>{html.escape(str(k))}</code>: <strong>{html.escape(str(v))}</strong>" for k, v in entities.items()]) if entities else "<em>None</em>"
+        invoked_badges = " ".join([f"<span class='aml-badge aml-badge-indigo'>{html.escape(t)}</span>" for t in all_tools_called])
+
+        exec_card = (
+            f"<div class='aml-card aml-summary-card' style='border-left: 4px solid var(--indigo); margin-bottom: 0.85rem;'>"
+            f"<div class='aml-card-header'>"
+            f"<span class='aml-badge aml-badge-indigo'>⚡ QUERY-AWARE EXECUTION SUMMARY</span>"
+            f"<span class='aml-score-tag'>Latency: <strong>{elapsed_ms} ms</strong></span>"
+            f"</div>"
+            f"<div class='aml-card-body'>"
+            f"📝 <strong>User Request:</strong> \"<code>{html.escape(query)}</code>\"<br>"
+            f"🧠 <strong>Parsed Intent:</strong> <code>{html.escape(intent)}</code><br>"
+            f"🔍 <strong>Detected Filters & Entities:</strong> {entities_str}<br>"
+            f"🛠️ <strong>Tools Invoked by Agent:</strong> {invoked_badges}"
+            f"</div>"
+            f"</div>"
+        )
+
+        output_payload["explanations"].insert(0, exec_card)
 
         return output_payload
 
