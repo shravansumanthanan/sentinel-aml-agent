@@ -228,7 +228,22 @@ class TestAIRegressionGuard(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir)
 
+    def test_ai_regression_entity_lookup_fallback(self):
+        """BUG-REGRESSION: Single entity lookup for missing subject returns non-empty explanations."""
+        req = ChatRequest(query="Is customer CUST-999999 suspicious?")
+        res = chat_endpoint(req)
+        self.assertEqual(res["parsed_intent"], "SINGLE_ENTITY_LOOKUP")
+        self.assertTrue(len(res["explanations"]) > 0, "Explanations should not be empty for unmapped customer ID")
+
+    def test_ai_regression_telemetry_tools_accuracy(self):
+        """BUG-REGRESSION: Telemetry tools_called should not contain duplicate entries."""
+        req = ChatRequest(query="Which customer has the highest risk score?")
+        res = chat_endpoint(req)
+        called = res["telemetry"]["tools_called"]
+        self.assertEqual(len(called), len(set(called)), "tools_called list must contain unique tool entries")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

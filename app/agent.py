@@ -203,7 +203,6 @@ class AMLAgentOrchestrator:
             output_payload["explanations"].append(exp)
 
         elif intent == "TOP_RISK_SUBJECT":
-            tools_invoked_live.extend(["SingleEntityLookupTool", "SARGeneratorTool"])
             tools_skipped.extend(["EDATool", "ThresholdStressTestTool"])
             execution_plan = [
                 "1. Screen customer population for highest overall suspicious activity indicators",
@@ -250,6 +249,7 @@ class AMLAgentOrchestrator:
             if lookup_data.get("found") and top_row["risk_level"] == "HIGH":
                 sar_text = self.sar_tool.generate_sar(str(top_row["customer_id"]), lookup_data["customer"], lookup_data["risk_profile"], lookup_data["transaction_history"], model_info=self.model_info)
                 output_payload["sar_narrative"] = sar_text
+                tools_invoked_live.append("SARGeneratorTool")
 
         elif intent == "LOWEST_RISK_SUBJECT":
             tools_invoked_live.extend(["SingleEntityLookupTool"])
@@ -360,6 +360,21 @@ class AMLAgentOrchestrator:
                 if r.get("risk_level") == "HIGH":
                     sar_text = self.sar_tool.generate_sar(cid, c, r, lookup_data["transaction_history"], model_info=self.model_info)
                     output_payload["sar_narrative"] = sar_text
+                    tools_invoked_live.append("SARGeneratorTool")
+            else:
+                safe_raw = html.escape(str(raw_cid))
+                exp = (
+                    f"<div class='aml-card aml-info-card'>"
+                    f"<div class='aml-card-header'>"
+                    f"<span class='aml-badge aml-badge-yellow'>⚠️ SUBJECT NOT FOUND</span>"
+                    f"</div>"
+                    f"<div class='aml-card-body'>"
+                    f"Unable to locate subject <strong>{safe_raw}</strong> in the active ledger.<br>"
+                    f"Check Customer ID input or select from active subjects in the <strong>Flagged Risk Table</strong>."
+                    f"</div>"
+                    f"</div>"
+                )
+                output_payload["explanations"].append(exp)
 
         elif intent == "SINGLE_ENTITY_LOOKUP":
             raw_cid = entities.get("customer_id") or self._get_top_suspicious_customer_id()
@@ -367,7 +382,7 @@ class AMLAgentOrchestrator:
             cid = match_result["resolved_id"] or raw_cid
             match_type = match_result["match_type"]
 
-            tools_invoked_live.extend(["SingleEntityLookupTool", "SARGeneratorTool"])
+            tools_invoked_live.append("SingleEntityLookupTool")
             tools_skipped.extend(["EDATool", ml_tool_name, "ThresholdStressTestTool"])
 
             execution_plan = [
@@ -420,6 +435,21 @@ class AMLAgentOrchestrator:
                 if risk_prof.get("risk_level") == "HIGH":
                     sar_text = self.sar_tool.generate_sar(cid, cust_info, risk_prof, tx_hist, model_info=self.model_info)
                     output_payload["sar_narrative"] = sar_text
+                    tools_invoked_live.append("SARGeneratorTool")
+            else:
+                safe_raw = html.escape(str(raw_cid))
+                exp_str = (
+                    f"<div class='aml-card aml-info-card'>"
+                    f"<div class='aml-card-header'>"
+                    f"<span class='aml-badge aml-badge-yellow'>⚠️ SUBJECT NOT FOUND</span>"
+                    f"</div>"
+                    f"<div class='aml-card-body'>"
+                    f"Unable to locate subject <strong>{safe_raw}</strong> in the active dataset.<br>"
+                    f"Check Customer ID input or select from active subjects in the <strong>Flagged Risk Table</strong>."
+                    f"</div>"
+                    f"</div>"
+                )
+                output_payload["explanations"].append(exp_str)
 
         elif intent == "HIGH_RISK_FILTER":
             risk_flt = entities.get("risk_filter") or "HIGH"
@@ -451,7 +481,6 @@ class AMLAgentOrchestrator:
             output_payload["explanations"].append(exp_str)
 
         elif intent == "STRUCTURING_SEARCH":
-            tools_invoked_live.append("SARGeneratorTool")
             tools_skipped.extend(["EDATool", "SingleEntityLookupTool", "ThresholdStressTestTool"])
 
             execution_plan = [
@@ -500,6 +529,7 @@ class AMLAgentOrchestrator:
                     model_info=self.model_info
                 )
                 output_payload["sar_narrative"] = sar_text
+                tools_invoked_live.append("SARGeneratorTool")
 
         elif intent == "LARGE_AMOUNT_FILTER":
             min_amt = entities.get("min_amount") or (self.df_transactions["amount"].quantile(0.95))
@@ -655,7 +685,7 @@ class AMLAgentOrchestrator:
             max_amt = entities.get("max_amount") or (self.df_transactions["amount"].max() * 0.99)
 
             # No live tool invocation — filters precomputed DataFrames
-            tools_skipped.extend(["EDATool", "IsolationForestMLTool", "SARGeneratorTool"])
+            tools_skipped.extend(["EDATool", ml_tool_name, "SARGeneratorTool"])
 
             execution_plan = [
                 f"1. Isolate accounts with repeated transactions bounded under ${max_amt:,.2f} (count >= {min_count})",

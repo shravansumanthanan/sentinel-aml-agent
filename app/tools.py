@@ -205,7 +205,13 @@ class SingleEntityLookupTool:
             return {"found": False, "message": f"Customer {customer_id} not found in database."}
         
         cust_dict = cust_info.iloc[0].to_dict()
-        cust_txs = df_tx[df_tx["customer_id"] == customer_id].sort_values(by="timestamp", ascending=False).to_dict(orient="records")
+        df_cust_txs = df_tx[df_tx["customer_id"] == customer_id].sort_values(by="timestamp", ascending=False)
+        df_clean_txs = df_cust_txs.replace([np.inf, -np.inf], np.nan)
+        obj_cols = df_clean_txs.select_dtypes(include=["object", "string"]).columns
+        num_cols = df_clean_txs.select_dtypes(exclude=["object", "string"]).columns
+        df_clean_txs[obj_cols] = df_clean_txs[obj_cols].fillna("")
+        df_clean_txs[num_cols] = df_clean_txs[num_cols].fillna(0)
+        cust_txs = df_clean_txs.to_dict(orient="records")
         
         risk_info = df_classified[df_classified["customer_id"] == customer_id]
         risk_dict = risk_info.iloc[0].to_dict() if not risk_info.empty else {}
