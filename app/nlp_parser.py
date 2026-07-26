@@ -39,6 +39,8 @@ class NLPIntentParser:
             r'(?:above|over|greater\s*than|more\s*than|>|exceeding|at\s*least)\s*[\$£€₹]?\s*([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)\s*(k)?\b(?!\s*(?:transactions|txns|tx|deposits|withdrawals|items|subjects|customers|users|records|days?|d\b))',
             re.IGNORECASE
         )
+        self.pat_gt_amount = re.compile(r'(?:greater\s*than|above|over|exceeding|more\s*than|>|at\s*least)\s*[\$£€₹]?\s*([0-9,]+)', re.IGNORECASE)
+        self.pat_lt_amount = re.compile(r'(?:less\s*than|below|under|at\s*most|<)\s*[\$£€₹]?\s*([0-9,]+)', re.IGNORECASE)
         self.pat_min_count_plus = re.compile(
             r'([0-9]+)\+\s*(?:transactions|txns|tx|deposits|withdrawals|items|subjects|customers)?',
             re.IGNORECASE
@@ -47,7 +49,7 @@ class NLPIntentParser:
             r'(?:more\s*than|>|at\s*least|over|above)\s*([0-9]+)\s*(?:txns|transactions|deposits|withdrawals|items|subjects|customers)',
             re.IGNORECASE
         )
-        self.pat_country = re.compile(r'\b(ky|pa|ae|us|gb|ca|de|fr|sg)\b', re.IGNORECASE)
+        self.pat_country = re.compile(r'\b(ky|pa|ae|us|gb|ca|de|fr|sg|cayman|panama|uae|cayman islands)\b', re.IGNORECASE)
         self.pat_stress_bound = re.compile(
             r'(?:stress\s*test|sensitivity|threshold)\s*(?:at|with|for)?\s*[\$£€₹]?\s*([0-9,]+)',
             re.IGNORECASE
@@ -87,65 +89,29 @@ class NLPIntentParser:
         is_score_mention = any(w in query_lower for w in ["score", "risk score", "composite score", "rating"])
         is_cust_mention = any(w in query_lower for w in ["customer", "customers", "subject", "subjects", "user", "users"])
 
-        if is_score_mention or (is_cust_mention and "$" not in query_lower and "£" not in query_lower and "€" not in query_lower and any(w in query_lower for w in ["between", "greater than", "less than", ">", "<", "above", "below"])):
-            dual_match = re.search(
-                r'(?:greater\s*than|above|over|more\s*than|higher\s*than|>|at\s*least|from|between)?\s*'
-                r'([0-9]+(?:\.[0-9]+)?)\%?\s*'
-                r'(?:and|to|-|,)\s*'
-                r'(?:less\s*than|below|under|lower\s*than|<|at\s*most)?\s*'
-                r'([0-9]+(?:\.[0-9]+)?)\%?',
-                query_lower
-            )
-            if dual_match and (is_score_mention or any(w in query_lower for w in ["between", "greater than", "less than", ">", "<"])):
+        if is_score_mention or (is_cust_mention and "$" not in query_lower and "£" not in query_lower and "€" not in query_lower and "₹" not in query_lower and any(w in query_lower for w in ["between", "greater than", "less than", ">", "<", "above", "below"])):
+            score_between = re.search(r'(?:between|from)?\s*([0-9]{1,3})\s*(?:and|to|-)\s*([0-9]{1,3})', query_lower)
+            if score_between and (is_score_mention or "and" in query_lower or "-" in query_lower):
                 try:
-                    v1 = float(dual_match.group(1))
-                    v2 = float(dual_match.group(2))
-                    min_s, max_s = min(v1, v2), max(v1, v2)
-                    if max_s <= 1.0 and max_s > 0:
-                        min_s *= 100.0
-                        max_s *= 100.0
-                    entities["min_score"] = min_s
-                    entities["max_score"] = max_s
+                    entities["min_score"] = float(score_between.group(1))
+                    entities["max_score"] = float(score_between.group(2))
                 except ValueError:
                     pass
+            else:
+                score_gt = re.search(r'(?:greater\s*than|>|above|exceeds|over)\s*([0-9]{1,3})', query_lower)
+                score_lt = re.search(r'(?:less\s*than|<|below|under)\s*([0-9]{1,3})', query_lower)
+                if score_gt and is_score_mention:
+                    entities["min_score"] = float(score_gt.group(1))
+                if score_lt and is_score_mention:
+                    entities["max_score"] = float(score_lt.group(1))
 
-            if is_score_mention:
-                if entities["min_score"] is None:
-                    min_score_match = re.search(
-                        r'(?:score|rating)\s*(?:is\s*)?(?:greater\s*than|above|over|more\s*than|higher\s*than|>|at\s*least)\s*([0-9]+(?:\.[0-9]+)?)\%?',
-                        query_lower
-                    )
-                    if min_score_match:
-                        try:
-                            v = float(min_score_match.group(1))
-                            if v <= 1.0 and v > 0:
-                                v *= 100.0
-                            entities["min_score"] = v
-                        except ValueError:
-                            pass
-
-                if entities["max_score"] is None:
-                    max_score_match = re.search(
-                        r'(?:score|rating)\s*(?:is\s*)?(?:less\s*than|below|under|lower\s*than|<|at\s*most)\s*([0-9]+(?:\.[0-9]+)?)\%?',
-                        query_lower
-                    )
-                    if max_score_match:
-                        try:
-                            v = float(max_score_match.group(1))
-                            if v <= 1.0 and v > 0:
-                                v *= 100.0
-                            entities["max_score"] = v
-                        except ValueError:
-                            pass
-
-        # 2. Extract Amount Range (Skip if score range was extracted)
-        amt_range_match = None
+        # 2. Extract Transaction Amounts (Min / Max)
         if entities["min_score"] is None and entities["max_score"] is None:
-            amt_range_match = self.pat_amt_range.search(query_lower)
-            if amt_range_match:
+            amt_between = re.search(r'between\s*[\$£€₹]?\s*([0-9,]+)\s*(?:and|to|-)\s*[\$£€₹]?\s*([0-9,]+)', query_lower)
+            if amt_between:
                 try:
-                    entities["min_amount"] = float(amt_range_match.group(1).replace(',', ''))
-                    entities["max_amount"] = float(amt_range_match.group(2).replace(',', ''))
+                    entities["min_amount"] = float(amt_between.group(1).replace(',', ''))
+                    entities["max_amount"] = float(amt_between.group(2).replace(',', ''))
                 except ValueError:
                     pass
             else:
@@ -160,10 +126,10 @@ class NLPIntentParser:
                     mult = 1000.0 if min_amt_match.group(2) else 1.0
                     entities["min_amount"] = float(val_str) * mult
 
-        # 3. Extract Customer ID (e.g., CUST-4521, C4521, 4521, customer 1089, cust 420, user 12)
+        # 3. Extract Customer ID (Exact Regex Matching)
         cust_match = self.pat_cust_explicit.search(query_lower)
         if not cust_match:
-            if not amt_range_match and entities["min_amount"] is None and entities["max_amount"] is None and entities["min_score"] is None and entities["max_score"] is None:
+            if entities["min_amount"] is None and entities["max_amount"] is None and entities["min_score"] is None and entities["max_score"] is None:
                 cust_match = self.pat_cust_bare.search(query_lower)
         
         if cust_match:
@@ -182,7 +148,7 @@ class NLPIntentParser:
             months_map = {
                 "jan": "01", "january": "01", "feb": "02", "february": "02",
                 "mar": "03", "march": "03", "apr": "04", "april": "04",
-                "may": "05", "jun": "06", "june": "06", "jul": "07", "july": "07",
+                "may": "05", "june": "06", "jun": "06", "july": "07", "jul": "07",
                 "aug": "08", "august": "08", "sep": "09", "september": "09",
                 "oct": "10", "october": "10", "nov": "11", "november": "11",
                 "dec": "12", "december": "12",
@@ -243,7 +209,7 @@ class NLPIntentParser:
             entities["pattern_type"] = "STRUCTURING"
         elif "rapid cash" in query_lower or "cash out" in query_lower or "cash-out" in query_lower or "velocity" in query_lower or "quick withdrawal" in query_lower:
             entities["pattern_type"] = "RAPID_CASHOUT"
-        elif "offshore" in query_lower or "fatf" in query_lower or "grey list" in query_lower or "gray list" in query_lower or "tax haven" in query_lower or "sanctioned" in query_lower or "overseas" in query_lower or "international" in query_lower or "country" in query_lower or "countries" in query_lower or "jurisdiction" in query_lower or "jurisdictions" in query_lower:
+        elif "offshore" in query_lower or "fatf" in query_lower or "grey list" in query_lower or "gray list" in query_lower or "tax haven" in query_lower or "sanctioned" in query_lower or "overseas" in query_lower or "international" in query_lower or "country" in query_lower or "countries" in query_lower or "jurisdiction" in query_lower or "jurisdictions" in query_lower or "cayman" in query_lower or "panama" in query_lower or "uae" in query_lower:
             entities["pattern_type"] = "OFFSHORE_JURISDICTION"
 
         # 9. Extract Transaction Type
@@ -259,7 +225,9 @@ class NLPIntentParser:
         # 10. Extract Country / Jurisdiction Code
         country_match = self.pat_country.search(query_lower)
         if country_match:
-            entities["country_code"] = country_match.group(1).upper()
+            c_val = country_match.group(1).upper()
+            country_map = {"CAYMAN": "KY", "CAYMAN ISLANDS": "KY", "PANAMA": "PA", "UAE": "AE"}
+            entities["country_code"] = country_map.get(c_val, c_val)
 
         # 11. Extract Customer Segment / Occupation
         segments = ["retail", "corporate", "institutional", "import/export", "real estate", "student", "accountant", "physician", "attorney", "consultant"]
@@ -287,16 +255,18 @@ class NLPIntentParser:
         # 14. Intelligent Intent Resolution Cascade
         if "help" in query_lower or "what can you do" in query_lower or "capabilities" in query_lower or "command" in query_lower or "guide" in query_lower:
             intent = "CAPABILITIES_HELP"
-        elif any(w in query_lower for w in ["should customer", "should case", "should transaction", "should this", "recommend the next action", "recommend action", "immediate investigation", "escalated", "escalation"]):
+        elif any(w in query_lower for w in ["should customer", "should case", "should transaction", "should this", "recommend the next action", "recommend action", "immediate investigation", "escalated", "escalation", "requiring immediate review", "require immediate escalation", "cases require"]):
             intent = "CASE_MANAGEMENT_RECOMMENDATION"
-        elif any(w in query_lower for w in ["generate report", "investigation report", "case report", "summary of today", "export all high-risk", "export high risk", "summary report", "aml case report"]):
+        elif any(w in query_lower for w in ["generate report", "investigation report", "case report", "summary of today", "export all high-risk", "export high risk", "summary report", "aml case report", "summary of today's"]):
             intent = "REPORT_GENERATION"
         elif "sar" in query_lower or "suspicious activity report" in query_lower or "file report" in query_lower:
             intent = "SAR_GENERATION"
         elif any(w in query_lower for w in ["behaviour", "behavior", "changed", "increased dramatically", "differently from historical", "unusual spending", "changed significantly", "historical average", "spending behavior"]):
             intent = "BEHAVIOR_CHANGE_ANALYSIS"
-        elif any(w in query_lower for w in ["cash deposit", "cash withdrawal", "frequent cash", "cash movement", "cash activity", "depositing and withdrawing"]):
+        elif any(w in query_lower for w in ["cash deposit", "cash withdrawal", "frequent cash", "cash movement", "cash activity", "depositing and withdrawing", "large cash", "cash spikes", "cash deposits"]):
             intent = "CASH_ACTIVITY_SEARCH"
+        elif entities["pattern_type"] == "OFFSHORE_JURISDICTION" or "country" in query_lower or "countries" in query_lower or "jurisdiction" in query_lower or "jurisdictions" in query_lower or "fatf" in query_lower or "offshore" in query_lower or "overseas" in query_lower or "international" in query_lower or "sanctioned" in query_lower or "cayman" in query_lower or "panama" in query_lower or "uae" in query_lower or entities["country_code"]:
+            intent = "JURISDICTION_ANALYSIS"
         elif entities["min_count"] is not None or (entities["max_amount"] is not None and entities["min_amount"] is not None):
             intent = "THRESHOLD_AGGREGATION"
         elif entities["pattern_type"] == "STRUCTURING" or "structuring" in query_lower or "smurfing" in query_lower or "avoid reporting" in query_lower or "split deposit" in query_lower or "similar amount" in query_lower or "repeated deposit" in query_lower or "repeated deposits" in query_lower:
@@ -332,8 +302,6 @@ class NLPIntentParser:
             intent = "FULL_EDA"
         elif entities["pattern_type"] == "RAPID_CASHOUT" or "cash out" in query_lower or "velocity" in query_lower or "rapid cash" in query_lower or "every few minutes" in query_lower:
             intent = "VELOCITY_SEARCH"
-        elif entities["pattern_type"] == "OFFSHORE_JURISDICTION" or "country" in query_lower or "countries" in query_lower or "jurisdiction" in query_lower or "jurisdictions" in query_lower or "fatf" in query_lower or "offshore" in query_lower or "overseas" in query_lower or "international" in query_lower or "sanctioned" in query_lower or entities["country_code"]:
-            intent = "JURISDICTION_ANALYSIS"
         elif "how many" in query_lower and ("risk" in query_lower or "customer" in query_lower or "subject" in query_lower or "count" in query_lower or "population" in query_lower):
             intent = "COUNT_RISK_SUMMARY"
         elif entities.get("transaction_type") or "wire" in query_lower or "channel" in query_lower or ("type" in query_lower and "transaction" in query_lower):

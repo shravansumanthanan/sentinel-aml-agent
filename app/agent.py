@@ -1379,7 +1379,7 @@ class AMLAgentOrchestrator:
         single_lookup = output_payload.get("results", {}).get("single_lookup", {})
         cid = entities.get("customer_id")
 
-        if intent in ["SINGLE_ENTITY_LOOKUP", "EXPLAIN_RISK_REASON", "CASE_MANAGEMENT_RECOMMENDATION", "BEHAVIOR_CHANGE_ANALYSIS", "REPORT_GENERATION"] and cid:
+        if intent in ["SINGLE_ENTITY_LOOKUP", "EXPLAIN_RISK_REASON", "CASE_MANAGEMENT_RECOMMENDATION", "BEHAVIOR_CHANGE_ANALYSIS", "REPORT_GENERATION", "SAR_GENERATION"] and cid:
             if single_lookup.get("found"):
                 r = single_lookup.get("risk_profile", {})
                 c = single_lookup.get("customer", {})
@@ -1389,9 +1389,14 @@ class AMLAgentOrchestrator:
                 action = r.get("recommended_action", "COMPLIANCE REVIEW")
                 verdict = "HIGH RISK" if level == "HIGH" else ("MEDIUM RISK" if level == "MEDIUM" else "LOW RISK (BASELINE)")
                 struct_cnt = r.get("structuring_count", 0)
-                return f"Customer {cid} ({name}): Status = {verdict} | Composite Risk Score: {score}/100 ({struct_cnt} structuring deposits). Recommended Action: {action}."
+                occ = c.get("occupation", "Account Holder")
+                country = c.get("country", "US")
+                return f"Customer {cid} ({name}, {occ}, {country}): Status = {verdict} | Composite Risk Score: {score}/100 ({struct_cnt} structuring deposits). Recommended Action: {action}."
             else:
                 return f"Customer {cid} was not located in the active ledger."
+
+        top_cids = [r.get("customer_id") for r in flagged_table if r.get("customer_id")][:5]
+        top_sample_str = ", ".join(top_cids) if top_cids else "None"
 
         if intent == "TOP_RISK_SUBJECT" and flagged_table:
             top = flagged_table[0]
@@ -1408,44 +1413,68 @@ class AMLAgentOrchestrator:
             score_val = low.get("composite_risk_score")
             return f"Customer {cid_val} ({name_val}) holds the lowest Risk Score ({score_val}/100). Status: Baseline Low Risk."
 
-        if intent == "DAILY_MONITORING":
+        if intent in ["DAILY_MONITORING", "REPORT_GENERATION"]:
             high_cnt = sum(1 for r in flagged_table if r.get("risk_level") == "HIGH")
             med_cnt = sum(1 for r in flagged_table if r.get("risk_level") == "MEDIUM")
-            return f"Identified {high_cnt} High-Risk and {med_cnt} Medium-Risk customer alerts requiring immediate compliance officer review."
+            high_cids = ", ".join([r.get("customer_id") for r in flagged_table if r.get("risk_level") == "HIGH"][:5])
+            return f"Surveillance Alert Summary: Identified {high_cnt} High-Risk and {med_cnt} Medium-Risk alerts requiring immediate compliance review (Top priority subjects: {high_cids or top_sample_str})."
+
+        if intent == "HIGH_RISK_FILTER":
+            high_cnt = sum(1 for r in flagged_table if r.get("risk_level") == "HIGH")
+            high_cids = ", ".join([r.get("customer_id") for r in flagged_table if r.get("risk_level") == "HIGH"][:5])
+            return f"Identified {high_cnt} High-Risk customer accounts requiring immediate review (Priority subjects: {high_cids or top_sample_str})."
+
+        if intent == "CASE_MANAGEMENT_RECOMMENDATION":
+            high_cnt = sum(1 for r in flagged_table if r.get("risk_level") == "HIGH")
+            high_cids = ", ".join([r.get("customer_id") for r in flagged_table if r.get("risk_level") == "HIGH"][:5])
+            return f"Escalation Priority: {high_cnt} cases require immediate escalation and FinCEN SAR filing (Top priority subjects: {high_cids or top_sample_str})."
 
         if intent == "STRUCTURING_SEARCH":
             count = len(flagged_table)
-            top_cid = flagged_table[0].get("customer_id") if count > 0 else "N/A"
-            return f"Flagged {count} customer accounts executing systematic currency deposits under the statutory $10,000 threshold. Top subject: {top_cid}."
+            return f"Structuring Findings: Flagged {count} customer accounts executing systematic currency deposits under the statutory $10,000 threshold (Top structuring subjects: {top_sample_str})."
 
         if intent == "LARGE_AMOUNT_FILTER":
             count = len(flagged_table)
             min_amt = entities.get("min_amount") or 50000.0
-            return f"Flagged {count} customer accounts involved in high-value transactions (>= ${min_amt:,.2f})."
+            max_amt = entities.get("max_amount")
+            if min_amt and max_amt:
+                return f"Transaction Amount Range Filter (${min_amt:,.2f} – ${max_amt:,.2f}): Flagged {count} customer accounts (Top subjects: {top_sample_str})."
+            return f"High-Value Transaction Threshold (>= ${min_amt:,.2f}): Flagged {count} customer accounts (Top subjects: {top_sample_str})."
 
         if intent == "JURISDICTION_ANALYSIS":
             count = len(flagged_table)
-            return f"Flagged {count} customer accounts executing transfers involving high-risk offshore jurisdictions (KY, PA, AE)."
+            code_str = entities.get("country_code") or "KY, PA, AE"
+            return f"FATF Jurisdiction Analysis ({code_str}): Flagged {count} customer accounts executing transfers involving high-risk offshore jurisdictions (Top subjects: {top_sample_str})."
 
         if intent == "SCORE_RANGE_FILTER":
             count = len(flagged_table)
             min_sc = entities.get("min_score")
             max_sc = entities.get("max_score")
             range_desc = f"{min_sc or 0} to {max_sc or 100}"
-            return f"Matched {count} customer profiles with Composite Risk Score in requested range ({range_desc})."
+            return f"Composite Risk Score Filter ({range_desc}): Matched {count} customer profiles (Top subjects: {top_sample_str})."
 
         if intent == "THRESHOLD_AGGREGATION":
             count = len(flagged_table)
             min_cnt = entities.get("min_count") or 5
             max_amt = entities.get("max_amount") or 10000.0
-            return f"Flagged {count} customer accounts making {min_cnt}+ transactions under ${max_amt:,.2f}."
+            return f"Threshold Avoidance Filter: Flagged {count} customer accounts making {min_cnt}+ transactions under ${max_amt:,.2f} (Top subjects: {top_sample_str})."
+
+        if intent in ["CASH_ACTIVITY_SEARCH", "VELOCITY_SEARCH"]:
+            count = len(flagged_table)
+            return f"Cash & Velocity Surveillance: Flagged {count} customer accounts exhibiting rapid cash-in to wire/withdrawal velocity spikes (Top subjects: {top_sample_str})."
+
+        if intent == "BEHAVIOR_CHANGE_ANALYSIS":
+            count = len(flagged_table)
+            return f"Behavioral Shift Detection: Flagged {count} customer accounts exhibiting severe volume deviation (>200% over historical baseline). Priority subjects: {top_sample_str}."
 
         if intent == "FULL_EDA":
             eda = output_payload.get("results", {}).get("eda", {}).get("summary", {})
             return f"Portfolio Analysis: {eda.get('total_transactions', 0):,} transactions across {eda.get('unique_customers', 0):,} customers totaling ${eda.get('total_volume', 0):,.2f}."
 
         count = len(flagged_table)
-        return f"Identified {count} subjects matching search criteria requiring compliance analyst review."
+        win_days = entities.get("time_window_days")
+        win_str = f"in the last {win_days} days" if win_days else "in requested search criteria"
+        return f"Investigative Findings ({win_str}): Identified {count} subjects requiring compliance analyst review (Top subjects: {top_sample_str})."
 
     def stress_test_threshold(self, lower_bound: float) -> Dict[str, Any]:
         return self.stress_test_tool.run(self.df_transactions, self.df_features, lower_bound=lower_bound)
