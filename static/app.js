@@ -446,8 +446,24 @@ async function submitQuery() {
         
         const finalDiv = document.createElement('div');
         finalDiv.className = 'trace-final';
-        finalDiv.innerHTML = formatAgentExplanations(data.explanations);
-        
+
+        let directAnswerHtml = '';
+        if (data.direct_answer) {
+            directAnswerHtml = `
+                <div class="aml-card aml-verdict-card" style="margin-bottom: 0.75rem; border-left: 4px solid #6366f1; background: rgba(15, 23, 42, 0.95); box-shadow: 0 4px 14px rgba(0,0,0,0.3);">
+                    <div class="aml-card-header" style="background: rgba(99, 102, 241, 0.18);">
+                        <span class="aml-badge aml-badge-indigo">🎯 DEFINITIVE COMPLIANCE ANSWER</span>
+                        <span class="aml-score-tag">Direct Verdict</span>
+                    </div>
+                    <div class="aml-card-body" style="font-size: 1.08rem; line-height: 1.6; color: #f8fafc; font-weight: 600;">
+                        ${escapeHTML(data.direct_answer)}
+                    </div>
+                </div>
+            `;
+        }
+
+        finalDiv.innerHTML = directAnswerHtml + formatAgentExplanations(data.explanations);
+
         processingDiv.appendChild(finalDiv);
         processingDiv.removeAttribute('id');
         scrollToBottom();

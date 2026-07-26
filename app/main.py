@@ -94,6 +94,7 @@ class ChatResponse(BaseModel):
     results: Dict[str, Any]
     explanations: List[str]
     sar_narrative: Optional[str] = None
+    direct_answer: Optional[str] = None
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat_endpoint(req: ChatRequest):

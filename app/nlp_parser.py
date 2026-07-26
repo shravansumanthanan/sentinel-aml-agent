@@ -11,8 +11,10 @@ class NLPIntentParser:
     def __init__(self):
         # Pre-compiled regular expressions for optimal parsing performance
         self.pat_cust_explicit = re.compile(
-            r'(?:cust(?:omer)?|user|subject|account|id)\s*[-#_]?\s*([0-9]{1,8})\b|'
-            r'\bCUST[-_]?([0-9]{1,8})\b',
+            r'\bCUST[-_]?([0-9]{1,8})\b|'
+            r'\bC[-_]?([0-9]{4,8})\b|'
+            r'\b(?:customer|cust|subject|user|account)\s*[-#_]?\s*([0-9]{1,8})\b|'
+            r'\b(?:id|#)\s*([0-9]{1,8})\b',
             re.IGNORECASE
         )
         self.pat_cust_bare = re.compile(r'(?<![\$,\d])\b([0-9]{4})\b(?![,0-9])')
@@ -63,6 +65,8 @@ class NLPIntentParser:
             "end_date": None,
             "max_amount": None,
             "min_amount": None,
+            "min_score": None,
+            "max_score": None,
             "min_count": None,
             "risk_filter": None,
             "pattern_type": None,
@@ -79,63 +83,145 @@ class NLPIntentParser:
             intent = "GREETING"
             return {"query": query, "intent": intent, "entities": entities}
 
-        # 2. Extract Amount Range (Priority BEFORE bare customer numbers to prevent 5000 in 'between 5000 and 9999' from matching a customer ID)
-        amt_range_match = self.pat_amt_range.search(query_lower)
-        if amt_range_match:
-            try:
-                entities["min_amount"] = float(amt_range_match.group(1).replace(',', ''))
-                entities["max_amount"] = float(amt_range_match.group(2).replace(',', ''))
-            except ValueError:
-                pass
-        else:
-            max_amt_match = self.pat_max_amt.search(query_lower)
-            if max_amt_match:
-                val_str = max_amt_match.group(1).replace(',', '')
-                entities["max_amount"] = float(val_str)
+        # 1b. Extract Risk Score Range Filters
+        is_score_mention = any(w in query_lower for w in ["score", "risk score", "composite score", "rating"])
+        is_cust_mention = any(w in query_lower for w in ["customer", "customers", "subject", "subjects", "user", "users"])
 
-            min_amt_match = self.pat_min_amt.search(query_lower)
-            if min_amt_match:
-                val_str = min_amt_match.group(1).replace(',', '')
-                mult = 1000.0 if min_amt_match.group(2) else 1.0
-                entities["min_amount"] = float(val_str) * mult
+        if is_score_mention or (is_cust_mention and "$" not in query_lower and "£" not in query_lower and "€" not in query_lower and any(w in query_lower for w in ["between", "greater than", "less than", ">", "<", "above", "below"])):
+            dual_match = re.search(
+                r'(?:greater\s*than|above|over|more\s*than|higher\s*than|>|at\s*least|from|between)?\s*'
+                r'([0-9]+(?:\.[0-9]+)?)\%?\s*'
+                r'(?:and|to|-|,)\s*'
+                r'(?:less\s*than|below|under|lower\s*than|<|at\s*most)?\s*'
+                r'([0-9]+(?:\.[0-9]+)?)\%?',
+                query_lower
+            )
+            if dual_match and (is_score_mention or any(w in query_lower for w in ["between", "greater than", "less than", ">", "<"])):
+                try:
+                    v1 = float(dual_match.group(1))
+                    v2 = float(dual_match.group(2))
+                    min_s, max_s = min(v1, v2), max(v1, v2)
+                    if max_s <= 1.0 and max_s > 0:
+                        min_s *= 100.0
+                        max_s *= 100.0
+                    entities["min_score"] = min_s
+                    entities["max_score"] = max_s
+                except ValueError:
+                    pass
 
-        # 3. Extract Customer ID (e.g., CUST-4521, 4521, customer 1089, cust 420, user 12, account 7, CUST-999999)
+            if is_score_mention:
+                if entities["min_score"] is None:
+                    min_score_match = re.search(
+                        r'(?:score|rating)\s*(?:is\s*)?(?:greater\s*than|above|over|more\s*than|higher\s*than|>|at\s*least)\s*([0-9]+(?:\.[0-9]+)?)\%?',
+                        query_lower
+                    )
+                    if min_score_match:
+                        try:
+                            v = float(min_score_match.group(1))
+                            if v <= 1.0 and v > 0:
+                                v *= 100.0
+                            entities["min_score"] = v
+                        except ValueError:
+                            pass
+
+                if entities["max_score"] is None:
+                    max_score_match = re.search(
+                        r'(?:score|rating)\s*(?:is\s*)?(?:less\s*than|below|under|lower\s*than|<|at\s*most)\s*([0-9]+(?:\.[0-9]+)?)\%?',
+                        query_lower
+                    )
+                    if max_score_match:
+                        try:
+                            v = float(max_score_match.group(1))
+                            if v <= 1.0 and v > 0:
+                                v *= 100.0
+                            entities["max_score"] = v
+                        except ValueError:
+                            pass
+
+        # 2. Extract Amount Range (Skip if score range was extracted)
+        amt_range_match = None
+        if entities["min_score"] is None and entities["max_score"] is None:
+            amt_range_match = self.pat_amt_range.search(query_lower)
+            if amt_range_match:
+                try:
+                    entities["min_amount"] = float(amt_range_match.group(1).replace(',', ''))
+                    entities["max_amount"] = float(amt_range_match.group(2).replace(',', ''))
+                except ValueError:
+                    pass
+            else:
+                max_amt_match = self.pat_max_amt.search(query_lower)
+                if max_amt_match:
+                    val_str = max_amt_match.group(1).replace(',', '')
+                    entities["max_amount"] = float(val_str)
+
+                min_amt_match = self.pat_min_amt.search(query_lower)
+                if min_amt_match:
+                    val_str = min_amt_match.group(1).replace(',', '')
+                    mult = 1000.0 if min_amt_match.group(2) else 1.0
+                    entities["min_amount"] = float(val_str) * mult
+
+        # 3. Extract Customer ID (e.g., CUST-4521, C4521, 4521, customer 1089, cust 420, user 12)
         cust_match = self.pat_cust_explicit.search(query_lower)
         if not cust_match:
-            # Only match bare 4-digit number if query does NOT contain amount filter/range keywords
-            if not amt_range_match and entities["min_amount"] is None and entities["max_amount"] is None:
+            if not amt_range_match and entities["min_amount"] is None and entities["max_amount"] is None and entities["min_score"] is None and entities["max_score"] is None:
                 cust_match = self.pat_cust_bare.search(query_lower)
         
         if cust_match:
-            cust_num = cust_match.group(1) or cust_match.group(2)
-            if cust_num:
+            groups = [g for g in cust_match.groups() if g is not None]
+            if groups:
+                cust_num = groups[0]
                 entities["raw_cust_num"] = cust_num
                 entities["customer_id"] = f"CUST-{int(cust_num):04d}" if len(cust_num) < 4 else f"CUST-{cust_num}"
 
-        # 4. Extract Date Range (e.g., "2026-01-01 to 2026-06-01")
+        # 4. Extract Date Range (e.g., "2026-01-01 to 2026-06-01" or "1 January and 31 January")
         date_range_match = self.pat_date_range.search(query_lower)
         if date_range_match:
             entities["start_date"] = date_range_match.group(1)
             entities["end_date"] = date_range_match.group(2)
+        else:
+            months_map = {
+                "jan": "01", "january": "01", "feb": "02", "february": "02",
+                "mar": "03", "march": "03", "apr": "04", "april": "04",
+                "may": "05", "jun": "06", "june": "06", "jul": "07", "july": "07",
+                "aug": "08", "august": "08", "sep": "09", "september": "09",
+                "oct": "10", "october": "10", "nov": "11", "november": "11",
+                "dec": "12", "december": "12",
+            }
+            named_date_match = re.search(
+                r'\b([0-9]{1,2})\s+([a-z]+)\s*(?:to|and|-)\s*([0-9]{1,2})\s+([a-z]+)\b',
+                query_lower
+            )
+            if named_date_match:
+                d1, m1_str, d2, m2_str = named_date_match.groups()
+                if m1_str in months_map and m2_str in months_map:
+                    entities["start_date"] = f"2026-{months_map[m1_str]}-{int(d1):02d}"
+                    entities["end_date"] = f"2026-{months_map[m2_str]}-{int(d2):02d}"
 
-        # 5. Extract Time Window (e.g., "last 30 days", "7d", "past 2 weeks", "past 3 months")
-        time_match = self.pat_time_window.search(query_lower)
-        if time_match:
-            val = int(time_match.group(1))
-            unit = time_match.group(2).lower()
-            if unit.startswith("w"):
-                val *= 7
-            elif unit.startswith("m"):
-                val *= 30
-            elif unit.startswith("y"):
-                val *= 365
-            entities["time_window_days"] = val
-        elif "week" in query_lower:
-            entities["time_window_days"] = 7
-        elif "month" in query_lower:
-            entities["time_window_days"] = 30
-        elif "year" in query_lower:
-            entities["time_window_days"] = 365
+        # 5. Extract Time Window (e.g., "today", "last 24 hours", "last 30 days", "7d", "past 2 weeks", "past 3 months")
+        if any(w in query_lower for w in ["today", "24 hours", "24h", "last 24", "yesterday"]):
+            entities["time_window_days"] = 1
+        else:
+            time_match = self.pat_time_window.search(query_lower)
+            if time_match:
+                val = int(time_match.group(1))
+                unit = time_match.group(2).lower()
+                if unit.startswith("w"):
+                    val *= 7
+                elif unit.startswith("m"):
+                    val *= 30
+                elif unit.startswith("y"):
+                    val *= 365
+                entities["time_window_days"] = val
+            elif "weekend" in query_lower:
+                entities["time_window_days"] = 7
+            elif "week" in query_lower:
+                entities["time_window_days"] = 7
+            elif "month" in query_lower:
+                entities["time_window_days"] = 30
+            elif "quarter" in query_lower or "90 days" in query_lower:
+                entities["time_window_days"] = 90
+            elif "year" in query_lower:
+                entities["time_window_days"] = 365
 
         # 6. Extract Min Transaction Count
         min_count_match = self.pat_min_count_plus.search(query_lower)
@@ -153,11 +239,11 @@ class NLPIntentParser:
             entities["risk_filter"] = "LOW"
 
         # 8. Extract AML Pattern Type
-        if "structuring" in query_lower or "smurfing" in query_lower or "under 10" in query_lower or "9000" in query_lower or "9,000" in query_lower or "split deposit" in query_lower:
+        if "structuring" in query_lower or "smurfing" in query_lower or "under 10" in query_lower or "9000" in query_lower or "9,000" in query_lower or "split deposit" in query_lower or "avoid reporting" in query_lower or "below 10" in query_lower or "below £10" in query_lower or "below $10" in query_lower or "below €10" in query_lower or "below ₹10" in query_lower or "repeated deposit" in query_lower or "repeated deposits" in query_lower:
             entities["pattern_type"] = "STRUCTURING"
         elif "rapid cash" in query_lower or "cash out" in query_lower or "cash-out" in query_lower or "velocity" in query_lower or "quick withdrawal" in query_lower:
             entities["pattern_type"] = "RAPID_CASHOUT"
-        elif "offshore" in query_lower or "fatf" in query_lower or "grey list" in query_lower or "gray list" in query_lower or "tax haven" in query_lower or "sanctioned" in query_lower:
+        elif "offshore" in query_lower or "fatf" in query_lower or "grey list" in query_lower or "gray list" in query_lower or "tax haven" in query_lower or "sanctioned" in query_lower or "overseas" in query_lower or "international" in query_lower or "country" in query_lower or "countries" in query_lower or "jurisdiction" in query_lower or "jurisdictions" in query_lower:
             entities["pattern_type"] = "OFFSHORE_JURISDICTION"
 
         # 9. Extract Transaction Type
@@ -165,7 +251,7 @@ class NLPIntentParser:
             entities["transaction_type"] = "Wire"
         elif "withdrawal" in query_lower or "cash out" in query_lower or "cash-out" in query_lower:
             entities["transaction_type"] = "Withdrawal"
-        elif "deposit" in query_lower:
+        elif "deposit" in query_lower and entities["pattern_type"] != "STRUCTURING":
             entities["transaction_type"] = "Deposit"
         elif "transfer" in query_lower:
             entities["transaction_type"] = "Transfer"
@@ -201,15 +287,29 @@ class NLPIntentParser:
         # 14. Intelligent Intent Resolution Cascade
         if "help" in query_lower or "what can you do" in query_lower or "capabilities" in query_lower or "command" in query_lower or "guide" in query_lower:
             intent = "CAPABILITIES_HELP"
-        elif "sar" in query_lower or "suspicious activity report" in query_lower or "file report" in query_lower or "generate report" in query_lower:
+        elif any(w in query_lower for w in ["should customer", "should case", "should transaction", "should this", "recommend the next action", "recommend action", "immediate investigation", "escalated", "escalation"]):
+            intent = "CASE_MANAGEMENT_RECOMMENDATION"
+        elif any(w in query_lower for w in ["generate report", "investigation report", "case report", "summary of today", "export all high-risk", "export high risk", "summary report", "aml case report"]):
+            intent = "REPORT_GENERATION"
+        elif "sar" in query_lower or "suspicious activity report" in query_lower or "file report" in query_lower:
             intent = "SAR_GENERATION"
+        elif any(w in query_lower for w in ["behaviour", "behavior", "changed", "increased dramatically", "differently from historical", "unusual spending", "changed significantly", "historical average", "spending behavior"]):
+            intent = "BEHAVIOR_CHANGE_ANALYSIS"
+        elif any(w in query_lower for w in ["cash deposit", "cash withdrawal", "frequent cash", "cash movement", "cash activity", "depositing and withdrawing"]):
+            intent = "CASH_ACTIVITY_SEARCH"
+        elif entities["min_count"] is not None or (entities["max_amount"] is not None and entities["min_amount"] is not None):
+            intent = "THRESHOLD_AGGREGATION"
+        elif entities["pattern_type"] == "STRUCTURING" or "structuring" in query_lower or "smurfing" in query_lower or "avoid reporting" in query_lower or "split deposit" in query_lower or "similar amount" in query_lower or "repeated deposit" in query_lower or "repeated deposits" in query_lower:
+            intent = "STRUCTURING_SEARCH"
+        elif ("today" in query_lower or "24 hours" in query_lower or "24h" in query_lower or "immediate review" in query_lower or "alerts generated yesterday" in query_lower or "today's" in query_lower or "todays" in query_lower) and not entities["customer_id"]:
+            intent = "DAILY_MONITORING"
         elif "stress test" in query_lower or "sensitivity" in query_lower or entities["stress_bound"] is not None:
             intent = "STRESS_TEST"
         elif entities["superlative"] == "MAX" and ("risk" in query_lower or "score" in query_lower or "suspicious" in query_lower or "who" in query_lower or "which" in query_lower or "subject" in query_lower) and not ("transaction" in query_lower and "size" in query_lower):
             intent = "TOP_RISK_SUBJECT"
         elif entities["superlative"] == "MIN" and ("risk" in query_lower or "score" in query_lower or "suspicious" in query_lower or "who" in query_lower or "which" in query_lower or "subject" in query_lower) and not ("transaction" in query_lower and "size" in query_lower):
             intent = "LOWEST_RISK_SUBJECT"
-        elif entities["customer_id"] and ("why" in query_lower or "explain" in query_lower or "reason" in query_lower or "factor" in query_lower or "cause" in query_lower or "driver" in query_lower):
+        elif any(w in query_lower for w in ["why", "explain", "reason", "factor", "evidence", "confidence", "what pattern"]) and ("risk" in query_lower or "flag" in query_lower or "score" in query_lower or "alert" in query_lower or entities["customer_id"]):
             intent = "EXPLAIN_RISK_REASON"
         elif entities["customer_id"]:
             intent = "SINGLE_ENTITY_LOOKUP"
@@ -230,18 +330,16 @@ class NLPIntentParser:
             or (entities["superlative"] is not None and "transaction" in query_lower and not any(w in query_lower for w in ["risk", "score", "suspicious", "who", "which"]))
         ):
             intent = "FULL_EDA"
-        elif entities["pattern_type"] == "STRUCTURING" or "structuring" in query_lower or "smurfing" in query_lower:
-            intent = "STRUCTURING_SEARCH"
-        elif entities["pattern_type"] == "RAPID_CASHOUT" or "cash out" in query_lower or "velocity" in query_lower:
+        elif entities["pattern_type"] == "RAPID_CASHOUT" or "cash out" in query_lower or "velocity" in query_lower or "rapid cash" in query_lower or "every few minutes" in query_lower:
             intent = "VELOCITY_SEARCH"
-        elif entities["pattern_type"] == "OFFSHORE_JURISDICTION" or "country" in query_lower or "countries" in query_lower or "jurisdiction" in query_lower or "jurisdictions" in query_lower or "fatf" in query_lower or "offshore" in query_lower or entities["country_code"]:
+        elif entities["pattern_type"] == "OFFSHORE_JURISDICTION" or "country" in query_lower or "countries" in query_lower or "jurisdiction" in query_lower or "jurisdictions" in query_lower or "fatf" in query_lower or "offshore" in query_lower or "overseas" in query_lower or "international" in query_lower or "sanctioned" in query_lower or entities["country_code"]:
             intent = "JURISDICTION_ANALYSIS"
         elif "how many" in query_lower and ("risk" in query_lower or "customer" in query_lower or "subject" in query_lower or "count" in query_lower or "population" in query_lower):
             intent = "COUNT_RISK_SUMMARY"
         elif entities.get("transaction_type") or "wire" in query_lower or "channel" in query_lower or ("type" in query_lower and "transaction" in query_lower):
             intent = "TRANSACTION_TYPE_BREAKDOWN"
-        elif entities["min_count"] is not None or (entities["max_amount"] is not None and entities["min_amount"] is not None):
-            intent = "THRESHOLD_AGGREGATION"
+        elif entities["min_score"] is not None or entities["max_score"] is not None:
+            intent = "SCORE_RANGE_FILTER"
         elif entities["min_amount"] is not None or entities["max_amount"] is not None:
             intent = "LARGE_AMOUNT_FILTER"
         elif entities["risk_filter"] or "flag" in query_lower or "anomal" in query_lower or "suspicious" in query_lower:
