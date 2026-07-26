@@ -40,7 +40,6 @@
 - [API Reference](#api-reference)
 - [Project Directory Structure](#project-directory-structure)
 - [Testing & Quality Assurance](#testing--quality-assurance)
-- [License & Data Attribution](#license--data-attribution)
 
 ---
 
@@ -557,16 +556,3 @@ Run tests locally:
 ```bash
 python3 -m unittest discover tests
 ```
-
----
-
-## License & Data Attribution
-
-- **Software License**: Distributed under the [MIT License](LICENSE).
-- **Data Attribution**:
-  - IBM Transactions for Anti-Money Laundering (AML) dataset courtesy of [E. Altman et al. on Kaggle](https://www.kaggle.com/datasets/ealenahmed/money-laundering-transaction-data).
-  - PaySim Synthetic Financial Dataset courtesy of [E. A. Lopez-Rojas et al. on Kaggle](https://www.kaggle.com/datasets/ealams/paysim1).
-
----
-
-*Built with precision for institutional compliance analytics and regulatory decisioning.*
