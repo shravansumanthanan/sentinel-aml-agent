@@ -66,6 +66,14 @@ class AMLAgentOrchestrator:
         self.df_scored = self.anomaly_tool.run(df_features_with_scores, use_precomputed_ml=True)
         self.df_classified = self.classifier_tool.run(self.df_scored)
 
+        # Synchronize df_customers risk_rating with dynamically classified risk levels
+        classified_map = dict(zip(self.df_classified["customer_id"], self.df_classified["risk_level"]))
+        self.df_customers["risk_rating"] = (
+            self.df_customers["customer_id"]
+            .map(classified_map)
+            .fillna(self.df_customers["risk_rating"])
+        )
+
     def _get_ml_tool_name(self) -> str:
         """Returns dynamic ML tool name based on active classifier mode (supervised vs unsupervised)."""
         if self.model_info and self.model_info.get("is_supervised"):
