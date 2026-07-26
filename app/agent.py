@@ -129,6 +129,52 @@ class AMLAgentOrchestrator:
         df_clean[num_cols] = df_clean[num_cols].fillna(0)
         return df_clean.to_dict(orient="records")
 
+    def _get_windowed_data(
+        self,
+        time_window_days: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Dynamically filters transaction ledger by requested time window or date range,
+        re-evaluating features and risk scores on demand.
+        Returns (df_tx_window, df_scored_window, df_classified_window).
+        """
+        if not time_window_days and not start_date and not end_date:
+            return self.df_transactions, self.df_scored, self.df_classified
+
+        df_tx = self.df_transactions.copy()
+        df_tx["ts"] = pd.to_datetime(df_tx["timestamp"], errors="coerce")
+
+        if start_date and end_date:
+            df_filtered = df_tx[
+                (df_tx["ts"] >= pd.to_datetime(start_date))
+                & (df_tx["ts"] <= pd.to_datetime(end_date))
+            ]
+        elif time_window_days:
+            max_dt = df_tx["ts"].max()
+            cutoff = max_dt - pd.Timedelta(days=int(time_window_days))
+            df_filtered = df_tx[df_tx["ts"] >= cutoff]
+        else:
+            df_filtered = df_tx
+
+        if df_filtered.empty:
+            return df_filtered, self.df_scored.head(0), self.df_classified.head(0)
+
+        # Dynamic feature extraction and scoring on temporal subset
+        df_feats = self.feature_tool.run(
+            df_filtered, time_window_days=time_window_days or 30
+        )
+        ml_scores = self.ml_classifier.score(df_feats)
+        df_feats_scored = df_feats.copy()
+        df_feats_scored["ml_score"] = ml_scores
+
+        df_scored = self.anomaly_tool.run(
+            df_feats_scored, use_precomputed_ml=True
+        )
+        df_classified = self.classifier_tool.run(df_scored)
+        return df_filtered, df_scored, df_classified
+
     def process_query(self, query: str) -> Dict[str, Any]:
         start_time = time.time()
 
@@ -593,18 +639,26 @@ class AMLAgentOrchestrator:
 
         elif intent == "STRUCTURING_SEARCH":
             tools_skipped.extend(["EDATool", "SingleEntityLookupTool", "ThresholdStressTestTool"])
+            time_win = entities.get("time_window_days")
+            s_date = entities.get("start_date")
+            e_date = entities.get("end_date")
 
+            df_tx_win, df_scored_win, df_classified_win = self._get_windowed_data(
+                time_window_days=time_win, start_date=s_date, end_date=e_date
+            )
+
+            window_note = f" in the last {time_win} days" if time_win else ""
             execution_plan = [
-                "1. Scan transaction ledger for structured deposit and smurfing patterns",
+                f"1. Scan transaction ledger{window_note} for structured deposit and smurfing patterns",
                 "2. Evaluate deposit frequencies near statutory reporting limits ($10,000)",
                 "3. Identify subjects repeatedly making cash deposits just under reporting thresholds",
                 "4. Classify high-risk subjects and assign compliance escalation recommendations",
                 "5. Draft FinCEN Suspicious Activity Report (SAR) narratives for top flagged subjects"
             ]
 
-            flagged = self.df_classified[self.df_classified["structuring_count"] > 0].sort_values(by="composite_risk_score", ascending=False)
+            flagged = df_classified_win[df_classified_win["structuring_count"] > 0].sort_values(by="composite_risk_score", ascending=False)
             if flagged.empty:
-                flagged = self.df_classified.sort_values(by="composite_risk_score", ascending=False).head(10)
+                flagged = df_classified_win.sort_values(by="composite_risk_score", ascending=False).head(10)
 
             merged_flagged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
             output_payload["results"]["flagged_table"] = self._clean_records(merged_flagged)
@@ -613,14 +667,15 @@ class AMLAgentOrchestrator:
             if top_subj is not None:
                 name_str = html.escape(str(top_subj['customer_name'] if ('customer_name' in top_subj and pd.notna(top_subj['customer_name'])) else top_subj['customer_id']))
                 safe_cid = html.escape(str(top_subj['customer_id']))
+                win_header = f" (Past {time_win} Days)" if time_win else ""
                 exp_str = (
                     f"<div class='aml-card aml-risk-card'>"
                     f"<div class='aml-card-header'>"
-                    f"<span class='aml-badge aml-badge-red'>🚨 STRUCTURING & SMURFING ALERT</span>"
+                    f"<span class='aml-badge aml-badge-red'>🚨 STRUCTURING & SMURFING ALERT{win_header}</span>"
                     f"<span class='aml-score-tag'>Flagged: <strong>{len(flagged)} Subjects</strong></span>"
                     f"</div>"
                     f"<div class='aml-card-body'>"
-                    f"Identified <strong>{len(flagged)} subjects</strong> exhibiting systematic currency structuring patterns.<br><br>"
+                    f"Identified <strong>{len(flagged)} subjects</strong> exhibiting systematic currency structuring patterns{window_note}.<br><br>"
                     f"<div class='aml-stats-grid'>"
                     f"<div class='aml-stat-box'><span class='aml-stat-lbl'>Top Subject</span><span class='aml-stat-val val-red'>{safe_cid}</span></div>"
                     f"<div class='aml-stat-box'><span class='aml-stat-lbl'>Structuring Deposits</span><span class='aml-stat-val'>{top_subj['structuring_count']}</span></div>"
@@ -636,36 +691,45 @@ class AMLAgentOrchestrator:
                     top_subj["customer_id"],
                     top_subj.to_dict(),
                     top_subj.to_dict(),
-                    self.df_transactions[self.df_transactions["customer_id"] == top_subj["customer_id"]].to_dict(orient="records"),
+                    df_tx_win[df_tx_win["customer_id"] == top_subj["customer_id"]].to_dict(orient="records"),
                     model_info=self.model_info
                 )
                 output_payload["sar_narrative"] = sar_text
                 tools_invoked_live.append("SARGeneratorTool")
 
         elif intent == "LARGE_AMOUNT_FILTER":
-            min_amt = entities.get("min_amount") or (self.df_transactions["amount"].quantile(0.95))
+            time_win = entities.get("time_window_days")
+            s_date = entities.get("start_date")
+            e_date = entities.get("end_date")
+
+            df_tx_win, df_scored_win, df_classified_win = self._get_windowed_data(
+                time_window_days=time_win, start_date=s_date, end_date=e_date
+            )
+
+            min_amt = entities.get("min_amount") or (df_tx_win["amount"].quantile(0.95) if not df_tx_win.empty else 10000.0)
             tools_skipped.extend(["EDATool", "SARGeneratorTool"])
 
+            window_note = f" in the last {time_win} days" if time_win else ""
             execution_plan = [
-                f"1. Filter transaction ledger for high-value transfers (>= ${min_amt:,.2f})",
+                f"1. Filter transaction ledger{window_note} for high-value transfers (>= ${min_amt:,.2f})",
                 "2. Identify associated account holders and aggregate capital movements",
                 "3. Rank subjects by total high-value transaction volume"
             ]
 
-            large_txs = self.df_transactions[self.df_transactions["amount"] >= min_amt]
-            large_cust_ids = large_txs["customer_id"].unique()
-            flagged = self.df_classified[self.df_classified["customer_id"].isin(large_cust_ids)].sort_values(by="total_tx_volume", ascending=False)
+            large_txs = df_tx_win[df_tx_win["amount"] >= min_amt] if not df_tx_win.empty else pd.DataFrame()
+            large_cust_ids = large_txs["customer_id"].unique() if not large_txs.empty else []
+            flagged = df_classified_win[df_classified_win["customer_id"].isin(large_cust_ids)].sort_values(by="total_tx_volume", ascending=False)
             merged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
             output_payload["results"]["flagged_table"] = self._clean_records(merged)
 
-            total_vol = large_txs["amount"].sum()
+            total_vol = large_txs["amount"].sum() if not large_txs.empty else 0.0
             exp = (
                 f"<div class='aml-card aml-info-card'>"
                 f"<div class='aml-card-header'>"
                 f"<span class='aml-badge aml-badge-indigo'>💎 HIGH-VALUE VOLUME FILTER</span>"
                 f"</div>"
                 f"<div class='aml-card-body'>"
-                f"Found <strong>{len(large_txs)} transactions</strong> exceeding threshold of <strong>${min_amt:,.2f}</strong>.<br><br>"
+                f"Found <strong>{len(large_txs)} transactions</strong> exceeding threshold of <strong>${min_amt:,.2f}</strong>{window_note}.<br><br>"
                 f"<div class='aml-stats-grid'>"
                 f"<div class='aml-stat-box'><span class='aml-stat-lbl'>Total High-Value Volume</span><span class='aml-stat-val'>${total_vol:,.2f}</span></div>"
                 f"<div class='aml-stat-box'><span class='aml-stat-lbl'>Unique Customers</span><span class='aml-stat-val'>{len(merged)}</span></div>"
@@ -676,20 +740,27 @@ class AMLAgentOrchestrator:
             output_payload["explanations"].append(exp)
 
         elif intent == "JURISDICTION_ANALYSIS":
+            time_win = entities.get("time_window_days")
             target_cc = entities.get("country_code")
             tools_skipped.extend(["SingleEntityLookupTool"])
 
+            df_tx_win, df_scored_win, df_classified_win = self._get_windowed_data(
+                time_window_days=time_win
+            )
+            window_note = f" in the last {time_win} days" if time_win else ""
+
             execution_plan = [
-                "1. Cross-reference transactions with FATF high-risk offshore jurisdictions (KY, PA, AE)",
+                f"1. Cross-reference transactions{window_note} with FATF high-risk offshore jurisdictions (KY, PA, AE)",
                 "2. Measure cross-border transaction volume and transfer counts per jurisdiction",
                 "3. Flag subjects engaging in capital flow through high-risk offshore channels"
             ]
 
             if target_cc:
-                tx_filtered = self.df_transactions[self.df_transactions["country_code"] == target_cc]
-                cust_ids = tx_filtered["customer_id"].unique()
-                sort_col = "high_risk_country_volume" if "high_risk_country_volume" in self.df_classified.columns else "composite_risk_score"
-                flagged = self.df_classified[self.df_classified["customer_id"].isin(cust_ids)].sort_values(by=sort_col, ascending=False)
+                tx_filtered = df_tx_win[df_tx_win["country_code"] == target_cc] if not df_tx_win.empty else pd.DataFrame()
+                cust_ids = tx_filtered["customer_id"].unique() if not tx_filtered.empty else []
+                sort_col = "high_risk_country_volume" if "high_risk_country_volume" in df_classified_win.columns else "composite_risk_score"
+                flagged = df_classified_win[df_classified_win["customer_id"].isin(cust_ids)].sort_values(by=sort_col, ascending=False)
+                tot_vol = tx_filtered['amount'].sum() if not tx_filtered.empty else 0.0
                 exp = (
                     f"<div class='aml-card aml-risk-card'>"
                     f"<div class='aml-card-header'>"
@@ -697,23 +768,24 @@ class AMLAgentOrchestrator:
                     f"<span class='aml-score-tag'>Country Code: <strong>{target_cc}</strong></span>"
                     f"</div>"
                     f"<div class='aml-card-body'>"
-                    f"Found <strong>{len(tx_filtered)} transactions</strong> involving jurisdiction <strong>{target_cc}</strong> "
-                    f"totaling <strong>${tx_filtered['amount'].sum():,.2f}</strong> across {len(flagged)} customers."
+                    f"Found <strong>{len(tx_filtered)} transactions</strong> involving jurisdiction <strong>{target_cc}</strong>{window_note} "
+                    f"totaling <strong>${tot_vol:,.2f}</strong> across {len(flagged)} customers."
                     f"</div>"
                     f"</div>"
                 )
             else:
-                tx_filtered = self.df_transactions[self.df_transactions["country_code"].isin(HIGH_RISK_JURISDICTIONS)]
-                flagged = self.df_classified[self.df_classified["high_risk_country_tx_count"] > 0].sort_values(by="high_risk_country_volume", ascending=False)
+                tx_filtered = df_tx_win[df_tx_win["country_code"].isin(HIGH_RISK_JURISDICTIONS)] if not df_tx_win.empty else pd.DataFrame()
+                flagged = df_classified_win[df_classified_win["high_risk_country_tx_count"] > 0].sort_values(by="high_risk_country_volume", ascending=False)
                 cc_str = ", ".join(HIGH_RISK_JURISDICTIONS)
+                tot_vol = tx_filtered['amount'].sum() if not tx_filtered.empty else 0.0
                 exp = (
                     f"<div class='aml-card aml-risk-card'>"
                     f"<div class='aml-card-header'>"
                     f"<span class='aml-badge aml-badge-red'>🌐 FATF OFFSHORE JURISDICTION ALERT</span>"
                     f"</div>"
                     f"<div class='aml-card-body'>"
-                    f"Found <strong>{len(tx_filtered)} transactions</strong> in high-risk offshore codes (<strong>{cc_str}</strong>) "
-                    f"totaling <strong>${tx_filtered['amount'].sum():,.2f}</strong> across <strong>{len(flagged)} subjects</strong>."
+                    f"Found <strong>{len(tx_filtered)} transactions</strong> in high-risk offshore codes (<strong>{cc_str}</strong>){window_note} "
+                    f"totaling <strong>${tot_vol:,.2f}</strong> across <strong>{len(flagged)} subjects</strong>."
                     f"</div>"
                     f"</div>"
                 )
