@@ -175,6 +175,38 @@ class AMLAgentOrchestrator:
         df_classified = self.classifier_tool.run(df_scored)
         return df_filtered, df_scored, df_classified
 
+    def _format_time_window_phrase(self, time_win: Optional[int]) -> Tuple[str, str]:
+        """
+        Dynamically formats time window into natural English (days, months, or years).
+        Returns (window_note, win_header).
+        Examples:
+          730  -> (" in the last 2 years", " (Past 2 Years)")
+          365  -> (" in the last 1 year", " (Past 1 Year)")
+          1825 -> (" in the last 5 years", " (Past 5 Years)")
+          180  -> (" in the last 6 months", " (Past 6 Months)")
+          90   -> (" in the last 3 months", " (Past 3 Months)")
+          30   -> (" in the last 30 days", " (Past 30 Days)")
+          3    -> (" in the last 3 days", " (Past 3 Days)")
+        """
+        if not time_win:
+            return "", ""
+
+        if time_win >= 365:
+            years = time_win / 365.0
+            if time_win % 365 == 0 or round(years, 1) == int(years):
+                y_str = f"{int(round(years))}"
+            else:
+                y_str = f"{years:.1f}"
+
+            unit_note = "year" if y_str == "1" else "years"
+            unit_hdr = "Year" if y_str == "1" else "Years"
+            return f" in the last {y_str} {unit_note}", f" (Past {y_str} {unit_hdr})"
+        elif time_win >= 60 and time_win % 30 == 0:
+            months = time_win // 30
+            return f" in the last {months} months", f" (Past {months} Months)"
+
+        return f" in the last {time_win} days", f" (Past {time_win} Days)"
+
     def process_query(self, query: str) -> Dict[str, Any]:
         start_time = time.time()
 
@@ -334,25 +366,34 @@ class AMLAgentOrchestrator:
 
         elif intent == "VELOCITY_SEARCH":
             tools_skipped.extend(["EDATool", "SingleEntityLookupTool", "ThresholdStressTestTool"])
+            time_win = entities.get("time_window_days")
+            s_date = entities.get("start_date")
+            e_date = entities.get("end_date")
+
+            df_tx_win, df_scored_win, df_classified_win = self._get_windowed_data(
+                time_window_days=time_win, start_date=s_date, end_date=e_date
+            )
+            window_note, win_header = self._format_time_window_phrase(time_win)
+
             execution_plan = [
-                "1. Scan ledger for rapid cash-out activity (withdrawals immediately following deposit)",
+                f"1. Scan ledger{window_note} for rapid cash-out activity (withdrawals immediately following deposit)",
                 "2. Measure time elapsed between incoming wire/deposit and outgoing cash withdrawal",
                 "3. Rank subjects exhibiting rapid cash-out velocity red flags"
             ]
-            flagged = self.df_classified[self.df_classified["rapid_cashout_count"] > 0].sort_values(by="composite_risk_score", ascending=False)
+            flagged = df_classified_win[df_classified_win["rapid_cashout_count"] > 0].sort_values(by="composite_risk_score", ascending=False)
             if flagged.empty:
-                flagged = self.df_classified.sort_values(by="composite_risk_score", ascending=False).head(10)
+                flagged = df_classified_win.sort_values(by="composite_risk_score", ascending=False).head(10)
             merged = pd.merge(flagged, self.df_customers, on="customer_id", how="left")
             output_payload["results"]["flagged_table"] = self._clean_records(merged)
 
             exp = (
                 f"<div class='aml-card aml-risk-card'>"
                 f"<div class='aml-card-header'>"
-                f"<span class='aml-badge aml-badge-red'>⚡ RAPID CASHOUT VELOCITY ALERT</span>"
+                f"<span class='aml-badge aml-badge-red'>⚡ RAPID CASHOUT VELOCITY ALERT{win_header}</span>"
                 f"<span class='aml-score-tag'>Flagged: <strong>{len(flagged)} Subjects</strong></span>"
                 f"</div>"
                 f"<div class='aml-card-body'>"
-                f"Identified <strong>{len(flagged)} subjects</strong> exhibiting rapid cash-out velocity (incoming funds withdrawn within 2 hours).<br><br>"
+                f"Identified <strong>{len(flagged)} subjects</strong> exhibiting rapid cash-out velocity{window_note} (incoming funds withdrawn within 2 hours).<br><br>"
                 f"Review flagged subjects in the <strong>Flagged Risk Table</strong> tab."
                 f"</div>"
                 f"</div>"
@@ -647,7 +688,7 @@ class AMLAgentOrchestrator:
                 time_window_days=time_win, start_date=s_date, end_date=e_date
             )
 
-            window_note = f" in the last {time_win} days" if time_win else ""
+            window_note, win_header = self._format_time_window_phrase(time_win)
             execution_plan = [
                 f"1. Scan transaction ledger{window_note} for structured deposit and smurfing patterns",
                 "2. Evaluate deposit frequencies near statutory reporting limits ($10,000)",
@@ -667,7 +708,7 @@ class AMLAgentOrchestrator:
             if top_subj is not None:
                 name_str = html.escape(str(top_subj['customer_name'] if ('customer_name' in top_subj and pd.notna(top_subj['customer_name'])) else top_subj['customer_id']))
                 safe_cid = html.escape(str(top_subj['customer_id']))
-                win_header = f" (Past {time_win} Days)" if time_win else ""
+                window_note, win_header = self._format_time_window_phrase(time_win)
                 exp_str = (
                     f"<div class='aml-card aml-risk-card'>"
                     f"<div class='aml-card-header'>"
@@ -709,7 +750,7 @@ class AMLAgentOrchestrator:
             min_amt = entities.get("min_amount") or (df_tx_win["amount"].quantile(0.95) if not df_tx_win.empty else 10000.0)
             tools_skipped.extend(["EDATool", "SARGeneratorTool"])
 
-            window_note = f" in the last {time_win} days" if time_win else ""
+            window_note, win_header = self._format_time_window_phrase(time_win)
             execution_plan = [
                 f"1. Filter transaction ledger{window_note} for high-value transfers (>= ${min_amt:,.2f})",
                 "2. Identify associated account holders and aggregate capital movements",
@@ -747,7 +788,7 @@ class AMLAgentOrchestrator:
             df_tx_win, df_scored_win, df_classified_win = self._get_windowed_data(
                 time_window_days=time_win
             )
-            window_note = f" in the last {time_win} days" if time_win else ""
+            window_note, win_header = self._format_time_window_phrase(time_win)
 
             execution_plan = [
                 f"1. Cross-reference transactions{window_note} with FATF high-risk offshore jurisdictions (KY, PA, AE)",
